@@ -18,37 +18,46 @@
       </div>
     </header>
 
-    <!-- 视频区域 -->
-    <div class="video-container" :class="{ 'with-chat': showChat }">
-      <!-- 主视频 -->
-      <div class="main-video">
-        <video ref="localVideo" autoplay muted playsinline></video>
-        <div class="video-label">
-          <span>{{ localName || '我' }} {{ isHost ? '(主持人)' : '' }}</span>
-          <span v-if="isMuted" class="muted-status">静音</span>
+    <!-- 会议内容区 -->
+    <div class="meeting-content" :class="{ 'with-chat': showChat }">
+      <!-- 语音状态显示 -->
+      <div class="audio-area">
+        <div class="audio-visual">
+          <div class="wave" :class="{ active: !isMuted && canSpeak }">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <div class="status-text">
+            <span v-if="isMuted" class="muted">静音中</span>
+            <span v-else-if="!canSpeak" class="no-speak">等待主持人允许发言</span>
+            <span v-else class="speaking">可以发言</span>
+          </div>
         </div>
-      </div>
-
-      <!-- 参会者列表（主持人模式） -->
-      <div class="participants-section" v-if="isHost">
-        <div class="participants-header">
-          <span>参会者 ({{ participants.length + 1 }})</span>
-        </div>
-        <div class="participants-list">
-          <!-- 自己 -->
-          <div class="participant-item">
-            <span class="participant-name">{{ localName || '我' }} (主持人)</span>
-            <div class="participant-actions">
-              <button :class="['btn-mute', isMuted && 'muted']" @click="toggleMute">
+        
+        <!-- 参会者列表 -->
+        <div class="participants-section">
+          <div class="participant-card" :class="{ 'is-host': isHost, 'is-self': true }">
+            <div class="avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
+            <div class="info">
+              <span class="name">{{ localName || '我' }} {{ isHost ? '(主持人)' : '' }}</span>
+              <span class="status">{{ isMuted ? '静音' : (canSpeak ? '在线' : '等待发言') }}</span>
+            </div>
+            <div class="actions" v-if="isHost">
+              <button :class="['btn-action', isMuted && 'active']" @click="toggleMute">
                 {{ isMuted ? '取消静音' : '静音' }}
               </button>
             </div>
           </div>
-          <!-- 其他参会者 -->
-          <div v-for="user in participants" :key="user.socketId" class="participant-item">
-            <span class="participant-name">{{ user.name }}</span>
-            <div class="participant-actions">
-              <button :class="['btn-mute', user.muted && 'muted']" @click="muteParticipant(user)">
+          
+          <div v-for="user in participants" :key="user.socketId" 
+               class="participant-card" 
+               :class="{ 'is-host': user.isHost, 'muted': user.muted }">
+            <div class="avatar">{{ user.name.charAt(0).toUpperCase() }}</div>
+            <div class="info">
+              <span class="name">{{ user.name }} {{ user.isHost ? '(主持人)' : '' }}</span>
+              <span class="status">{{ user.muted ? '已静音' : '在线' }}</span>
+            </div>
+            <div class="actions" v-if="isHost && !user.isHost">
+              <button :class="['btn-action', user.muted && 'active']" @click="muteParticipant(user)">
                 {{ user.muted ? '取消静音' : '静音' }}
               </button>
               <button class="btn-remove" @click="removeParticipant(user)">
@@ -58,33 +67,12 @@
           </div>
         </div>
       </div>
-
-      <!-- 小窗口（非主持人模式） -->
-      <div class="participants" v-else>
-        <div 
-          v-for="user in otherParticipants" 
-          :key="user.socketId"
-          class="participant"
-          @click="switchVideo(user)"
-        >
-          <div class="participant-video">
-            <video :ref="el => setVideoRef(el, user.socketId)" autoplay playsinline></video>
-            <div class="video-label">{{ user.name }}</div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- 控制栏 -->
     <footer class="controls">
-      <button :class="['control-btn', isMuted && 'active']" @click="toggleMute">
-        {{ isMuted ? '静音' : '麦克风' }}
-      </button>
-      <button :class="['control-btn', isVideoOff && 'active']" @click="toggleVideo">
-        {{ isVideoOff ? '关闭' : '摄像头' }}
-      </button>
-      <button :class="['control-btn', isScreenSharing && 'active']" @click="toggleScreenShare">
-        共享
+      <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak && !isHost">
+        {{ isMuted ? '取消静音' : '静音' }}
       </button>
       <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
         聊天
@@ -125,8 +113,6 @@ const router = useRouter()
 const meeting = ref(null)
 const participants = ref([])
 const messages = ref([])
-const localVideo = ref(null)
-const videoRefs = ref({})
 const chatContainer = ref(null)
 const localName = ref('')
 const localParticipantId = ref(null)
@@ -135,15 +121,13 @@ const isHost = ref(false)
 const locked = ref(false)
 
 const socket = ref(null)
-const isMuted = ref(false)
-const isVideoOff = ref(false)
-const isScreenSharing = ref(false)
+const isMuted = ref(true) // 默认静音
 const showChat = ref(false)
 const chatMsg = ref('')
 const duration = ref('00:00')
 const startTime = Date.now()
 
-const otherParticipants = computed(() => participants.value.filter(p => p.socketId !== socket.value?.id))
+const canSpeak = computed(() => !isMuted.value && (isHost.value || !locked.value))
 
 const copyLink = async () => {
   const link = window.location.origin + '/meeting/' + route.params.no
@@ -205,16 +189,13 @@ const removeParticipant = async (user) => {
   }
 }
 
-const setVideoRef = (el, socketId) => {
-  if (el) videoRefs.value[socketId] = el
-}
-
-const initMedia = async () => {
+const initAudio = async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-    if (localVideo.value) localVideo.value.srcObject = stream
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    // 保存音频流但不自动播放，等待主持人允许
+    window.localAudioStream = stream
   } catch (e) {
-    console.warn('无法访问媒体设备:', e)
+    console.warn('无法访问麦克风:', e)
   }
 }
 
@@ -225,7 +206,8 @@ const connectSocket = () => {
     socket.value.emit('join-room', {
       meetingId: route.params.no,
       participantId: localParticipantId.value,
-      participantName: localName.value || '匿名'
+      participantName: localName.value || '匿名',
+      isHost: isHost.value
     })
   })
 
@@ -247,14 +229,17 @@ const connectSocket = () => {
   })
 
   socket.value.on('participant-muted', ({ participantId, muted }) => {
+    // 如果是自己被静音
+    if (participantId === localParticipantId.value) {
+      isMuted.value = muted
+      if (window.localAudioStream) {
+        window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !muted)
+      }
+    }
+    
     const user = participants.value.find(p => p.id === participantId)
     if (user) {
       user.muted = muted
-      // 如果是自己被静音
-      if (participantId === localParticipantId.value && localVideo.value?.srcObject) {
-        isMuted.value = muted
-        localVideo.value.srcObject.getAudioTracks().forEach(t => t.enabled = !muted)
-      }
     }
   })
 
@@ -274,30 +259,12 @@ const connectSocket = () => {
 
   socket.value.on('meeting-locked', () => {
     locked.value = true
-    messages.value.push({ name: '系统', content: '会议已锁定，新参会者无法加入', isSelf: false })
+    messages.value.push({ name: '系统', content: '会议已锁定，新参会者需要等待主持人允许才能发言', isSelf: false })
   })
 
   socket.value.on('meeting-unlocked', () => {
     locked.value = false
-    messages.value.push({ name: '系统', content: '会议已解锁', isSelf: false })
-  })
-
-  socket.value.on('offer', async ({ offer, from }) => {
-    const pc = getPeerConnection(from)
-    await pc.setRemoteDescription(new RTCSessionDescription(offer))
-    const answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-    socket.value.emit('answer', { meetingId: route.params.no, answer, targetSocketId: from })
-  })
-
-  socket.value.on('answer', async ({ answer, from }) => {
-    const pc = getPeerConnection(from)
-    await pc.setRemoteDescription(new RTCSessionDescription(answer))
-  })
-
-  socket.value.on('ice-candidate', async ({ candidate, from }) => {
-    const pc = getPeerConnection(from)
-    if (candidate) await pc.addIceCandidate(new RTCIceCandidate(candidate))
+    messages.value.push({ name: '系统', content: '会议已解锁，所有参会者可以发言', isSelf: false })
   })
 
   socket.value.on('chat-message', (msg) => {
@@ -308,33 +275,6 @@ const connectSocket = () => {
   })
 }
 
-const peerConnections = new Map()
-const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
-
-const getPeerConnection = (targetSocketId) => {
-  if (!peerConnections.has(targetSocketId)) {
-    const pc = new RTCPeerConnection(config)
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        socket.value.emit('ice-candidate', { meetingId: route.params.no, candidate: e.candidate, targetSocketId })
-      }
-    }
-    pc.ontrack = (e) => {
-      const videoEl = videoRefs.value[targetSocketId]
-      if (videoEl && e.streams[0]) {
-        videoEl.srcObject = e.streams[0]
-      }
-    }
-    
-    if (localVideo.value?.srcObject) {
-      localVideo.value.srcObject.getTracks().forEach(track => pc.addTrack(track, localVideo.value.srcObject))
-    }
-    
-    peerConnections.set(targetSocketId, pc)
-  }
-  return peerConnections.get(targetSocketId)
-}
-
 const fetchMeeting = async () => {
   try {
     const res = await fetch(`/api/meetings/${route.params.no}`)
@@ -342,11 +282,15 @@ const fetchMeeting = async () => {
     if (data.success) {
       meeting.value = data.data.meeting
       
-      // 检查是否是主持人
       const myName = route.query.name || localStorage.getItem('userName') || ''
       isHost.value = data.data.meeting.hostName === myName
-      localParticipantId.value = Date.now()
       
+      // 主持人默认可以发言，其他人默认静音
+      if (!isHost.value) {
+        isMuted.value = true
+      }
+      
+      localParticipantId.value = Date.now()
       messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
     } else {
       alert('会议不存在')
@@ -358,35 +302,19 @@ const fetchMeeting = async () => {
 }
 
 const toggleMute = () => {
+  if (!isHost.value && locked.value) {
+    alert('请等待主持人允许发言')
+    return
+  }
+  
   isMuted.value = !isMuted.value
-  if (localVideo.value?.srcObject) {
-    localVideo.value.srcObject.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
+  if (window.localAudioStream) {
+    window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
   }
-}
-
-const toggleVideo = () => {
-  isVideoOff.value = !isVideoOff.value
-  if (localVideo.value?.srcObject) {
-    localVideo.value.srcObject.getVideoTracks().forEach(t => t.enabled = !isVideoOff.value)
-  }
-}
-
-const toggleScreenShare = async () => {
-  if (isScreenSharing.value) {
-    isScreenSharing.value = false
-    initMedia()
-  } else {
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
-      if (localVideo.value) localVideo.value.srcObject = stream
-      isScreenSharing.value = true
-      stream.getVideoTracks()[0].onended = () => {
-        isScreenSharing.value = false
-        initMedia()
-      }
-    } catch {
-      alert('屏幕共享失败')
-    }
+  
+  // 通知其他人
+  if (socket.value) {
+    socket.value.emit('mute-self', { muted: isMuted.value })
   }
 }
 
@@ -401,6 +329,9 @@ const sendMessage = async () => {
 const leaveMeeting = () => {
   socket.value?.emit('leave-room', { meetingId: route.params.no })
   socket.value?.disconnect()
+  if (window.localAudioStream) {
+    window.localAudioStream.getTracks().forEach(t => t.stop())
+  }
   router.push('/')
 }
 
@@ -415,17 +346,16 @@ const updateDuration = () => {
 onMounted(async () => {
   localName.value = route.query.name || localStorage.getItem('userName') || ''
   await fetchMeeting()
-  await initMedia()
+  await initAudio()
   connectSocket()
   timer = setInterval(updateDuration, 1000)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
-  peerConnections.forEach(pc => pc.close())
   socket.value?.disconnect()
-  if (localVideo.value?.srcObject) {
-    localVideo.value.srcObject.getTracks().forEach(t => t.stop())
+  if (window.localAudioStream) {
+    window.localAudioStream.getTracks().forEach(t => t.stop())
   }
 })
 </script>
@@ -472,88 +402,129 @@ onUnmounted(() => {
 
 .time, .users { color: #888; font-size: 14px; }
 
-.video-container {
+.meeting-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 20px;
-  gap: 16px;
-}
-
-.video-container.with-chat { margin-right: 340px; }
-
-.main-video {
-  flex: 1;
-  background: #141414;
-  border-radius: 4px;
-  position: relative;
-  overflow: hidden;
-  border: 1px solid #222;
-}
-
-.main-video video { width: 100%; height: 100%; object-fit: cover; }
-.video-label { 
-  position: absolute; 
-  bottom: 16px; 
-  left: 16px; 
-  background: rgba(0,0,0,0.6); 
-  padding: 8px 14px; 
-  border-radius: 2px; 
-  color: #fff; 
-  font-size: 14px;
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-.muted-status { color: #ff4d4f; font-size: 12px; }
-
-.participants-section {
-  background: #141414;
-  border: 1px solid #222;
-  border-radius: 4px;
-  padding: 16px;
-  max-height: 200px;
+  padding: 40px;
+  gap: 40px;
   overflow-y: auto;
 }
 
-.participants-header {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 12px;
-  letter-spacing: 1px;
-}
+.meeting-content.with-chat { margin-right: 340px; }
 
-.participants-list { display: flex; flex-direction: column; gap: 8px; }
-
-.participant-item {
+.audio-area {
+  flex: 1;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  padding: 10px 12px;
-  background: #0a0a0a;
-  border-radius: 2px;
+  gap: 40px;
 }
 
-.participant-name { color: #fff; font-size: 14px; }
+.audio-visual {
+  text-align: center;
+}
 
-.participant-actions { display: flex; gap: 8px; }
+.wave {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  height: 80px;
+  margin-bottom: 16px;
+}
 
-.btn-mute, .btn-remove {
-  padding: 6px 12px;
-  font-size: 11px;
+.wave span {
+  width: 4px;
+  height: 20px;
+  background: #333;
   border-radius: 2px;
-  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.wave.active span {
+  background: #fff;
+  animation: wave 1s ease-in-out infinite;
+}
+
+.wave span:nth-child(1) { animation-delay: 0s; }
+.wave span:nth-child(2) { animation-delay: 0.1s; }
+.wave span:nth-child(3) { animation-delay: 0.2s; }
+.wave span:nth-child(4) { animation-delay: 0.3s; }
+.wave span:nth-child(5) { animation-delay: 0.4s; }
+
+@keyframes wave {
+  0%, 100% { height: 20px; }
+  50% { height: 60px; }
+}
+
+.status-text { color: #888; font-size: 14px; letter-spacing: 2px; }
+.status-text .muted { color: #ff4d4f; }
+.status-text .no-speak { color: #ff9800; }
+.status-text .speaking { color: #4caf50; }
+
+.participants-section {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.participant-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 4px;
   transition: all 0.2s;
 }
 
-.btn-mute {
+.participant-card:hover { border-color: #333; }
+.participant-card.muted { opacity: 0.6; }
+.participant-card.is-host { border-color: #444; background: #1a1a1a; }
+.participant-card.is-self { border-color: #444; }
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  background: #222;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.is-host .avatar { background: #333; }
+
+.info { flex: 1; }
+.info .name { display: block; color: #fff; font-size: 16px; margin-bottom: 4px; }
+.info .status { color: #666; font-size: 12px; }
+
+.actions { display: flex; gap: 8px; }
+
+.btn-action, .btn-remove {
+  padding: 8px 16px;
+  font-size: 12px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+  letter-spacing: 1px;
+}
+
+.btn-action {
   background: #222;
   color: #fff;
   border: 1px solid #333;
 }
 
-.btn-mute:hover { background: #333; }
-.btn-mute.muted { background: #fff; color: #000; border-color: #fff; }
+.btn-action:hover { background: #333; }
+.btn-action.active { background: #fff; color: #000; border-color: #fff; }
 
 .btn-remove {
   background: transparent;
@@ -563,36 +534,31 @@ onUnmounted(() => {
 
 .btn-remove:hover { background: #ff4d4f; color: #fff; }
 
-.participants { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 4px; }
-.participant { width: 140px; height: 90px; flex-shrink: 0; cursor: pointer; }
-.participant-video { width: 100%; height: 100%; background: #141414; border-radius: 4px; overflow: hidden; position: relative; border: 1px solid #222; }
-.participant-video video { width: 100%; height: 100%; object-fit: cover; }
-.participant-video .video-label { font-size: 12px; padding: 6px 10px; }
-
 .controls {
   display: flex;
   justify-content: center;
-  gap: 20px;
-  padding: 20px;
+  gap: 24px;
+  padding: 24px;
   background: #141414;
   border-top: 1px solid #222;
 }
 
 .control-btn {
-  width: 64px;
-  height: 64px;
+  min-width: 120px;
+  padding: 16px 24px;
   border-radius: 4px;
   border: none;
   background: #222;
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
+  letter-spacing: 2px;
   cursor: pointer;
   transition: all 0.3s;
-  letter-spacing: 1px;
 }
 
 .control-btn:hover { background: #333; }
 .control-btn.active { background: #fff; color: #000; }
+.control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .control-btn.danger { background: #ff4d4f; }
 .control-btn.danger:hover { background: #ff6b6b; }
 
@@ -670,10 +636,10 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .video-container.with-chat { margin-right: 0; }
+  .meeting-content.with-chat { margin-right: 0; }
   .chat-panel { width: 100%; }
-  .participants { display: none; }
-  .control-btn { width: 56px; height: 56px; font-size: 11px; }
   .header-actions .btn-copy, .header-actions .btn-lock { display: none; }
+  .controls { gap: 16px; }
+  .control-btn { min-width: 80px; padding: 14px 16px; font-size: 12px; }
 }
 </style>
