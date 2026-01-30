@@ -7,6 +7,9 @@
         <span class="meeting-no">会议号: {{ meeting?.meetingNo }}</span>
       </div>
       <div class="header-actions">
+        <button class="btn-copy" @click="copyLink" :class="{ copied }">
+          {{ copied ? '已复制' : '复制链接' }}
+        </button>
         <span class="time">{{ duration }}</span>
         <span class="users">{{ participants.length + 1 }}人</span>
       </div>
@@ -19,7 +22,7 @@
         <video ref="localVideo" autoplay muted playsinline></video>
         <div class="video-label">
           <span>{{ localName || '我' }}</span>
-          <span v-if="isMuted" class="muted-icon">静音</span>
+          <span v-if="isMuted" class="muted-status">静音</span>
         </div>
       </div>
 
@@ -79,7 +82,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 
@@ -93,6 +96,7 @@ const localVideo = ref(null)
 const videoRefs = ref({})
 const chatContainer = ref(null)
 const localName = ref('')
+const copied = ref(false)
 
 const socket = ref(null)
 const isMuted = ref(false)
@@ -104,6 +108,25 @@ const duration = ref('00:00')
 const startTime = Date.now()
 
 const otherParticipants = computed(() => participants.value.filter(p => p.socketId !== socket.value?.id))
+
+const copyLink = async () => {
+  const link = window.location.origin + '/meeting/' + route.params.no
+  try {
+    await navigator.clipboard.writeText(link)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch (e) {
+    // Fallback
+    const textArea = document.createElement('textarea')
+    textArea.value = link
+    document.body.appendChild(textArea)
+    textArea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textArea)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  }
+}
 
 const setVideoRef = (el, socketId) => {
   if (el) videoRefs.value[socketId] = el
@@ -306,9 +329,28 @@ onUnmounted(() => {
   border-bottom: 1px solid #222;
 }
 
-.meeting-info .title { color: #fff; font-size: 16px; font-weight: 500; margin-right: 20px; }
-.meeting-info .meeting-no { color: #666; font-size: 14px; }
-.header-actions { display: flex; gap: 24px; color: #888; font-size: 14px; }
+.meeting-info { display: flex; align-items: center; gap: 20px; }
+.meeting-info .title { color: #fff; font-size: 16px; font-weight: 500; }
+.meeting-info .meeting-no { color: #666; font-size: 14px; font-family: monospace; }
+
+.header-actions { display: flex; align-items: center; gap: 24px; }
+
+.btn-copy {
+  padding: 8px 16px;
+  background: #222;
+  color: #fff;
+  border: 1px solid #333;
+  border-radius: 2px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-copy:hover { background: #333; }
+.btn-copy.copied { background: #fff; color: #000; border-color: #fff; }
+
+.time, .users { color: #888; font-size: 14px; }
 
 .video-container {
   flex: 1;
@@ -343,7 +385,7 @@ onUnmounted(() => {
   gap: 12px;
   align-items: center;
 }
-.muted-icon { color: #ff4d4f; font-size: 12px; }
+.muted-status { color: #ff4d4f; font-size: 12px; }
 
 .participants { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 4px; }
 .participant { width: 140px; height: 90px; flex-shrink: 0; cursor: pointer; }
@@ -456,5 +498,6 @@ onUnmounted(() => {
   .chat-panel { width: 100%; }
   .participants { display: none; }
   .control-btn { width: 56px; height: 56px; font-size: 11px; }
+  .header-actions .btn-copy { display: none; }
 }
 </style>
