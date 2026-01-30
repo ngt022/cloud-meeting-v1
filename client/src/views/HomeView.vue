@@ -1,7 +1,7 @@
 <template>
   <div class="home">
     <div class="header">
-      <h1>📹 CloudMeeting</h1>
+      <h1>CloudMeeting</h1>
       <p>极简视频会议 - 无需注册，开箱即用</p>
     </div>
 
@@ -166,33 +166,37 @@ const joinMeeting = async () => {
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #0a0a0a;
 }
 
 .header {
   text-align: center;
   margin-bottom: 60px;
-  color: white;
 }
 
 .header h1 {
   font-size: 48px;
+  font-weight: 300;
   margin-bottom: 16px;
+  color: #fff;
+  letter-spacing: 4px;
 }
 
 .header p {
-  font-size: 18px;
-  opacity: 0.9;
+  font-size: 14px;
+  color: #666;
+  letter-spacing: 2px;
 }
 
 .actions {
   display: flex;
-  gap: 20px;
+  gap: 24px;
 }
 
 button.large {
-  padding: 20px 60px;
-  font-size: 20px;
+  padding: 18px 56px;
+  font-size: 16px;
+  letter-spacing: 2px;
 }
 
 .modal {
@@ -201,7 +205,7 @@ button.large {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.8);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -209,84 +213,115 @@ button.large {
 }
 
 .modal-content {
-  background: white;
-  padding: 40px;
-  border-radius: 16px;
+  background: #141414;
+  padding: 48px;
+  border-radius: 4px;
   width: 90%;
   max-width: 400px;
+  border: 1px solid #222;
 }
 
 .modal-content h2 {
-  margin-bottom: 24px;
+  margin-bottom: 32px;
   text-align: center;
+  font-weight: 300;
+  color: #fff;
+  letter-spacing: 4px;
 }
 
 .form-group {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 8px;
-  font-weight: 500;
-  color: #333;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #888;
+  letter-spacing: 1px;
 }
 
 .form-group input {
   width: 100%;
-  padding: 12px;
-  border: 2px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 16px;
+  padding: 14px;
+  background: #0a0a0a;
+  border: 1px solid #222;
+  border-radius: 2px;
+  font-size: 14px;
+  color: #fff;
+  letter-spacing: 1px;
 }
 
 .form-group input:focus {
-  border-color: #667eea;
+  border-color: #444;
   outline: none;
+}
+
+.form-group input::placeholder {
+  color: #444;
 }
 
 .modal-actions {
   display: flex;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 32px;
 }
 
 .btn-primary {
   flex: 1;
   padding: 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
+  background: #fff;
+  color: #000;
   border: none;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
+  border-radius: 2px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 2px;
   cursor: pointer;
+  transition: all 0.3s;
 }
 
 .btn-primary:disabled {
-  opacity: 0.6;
+  opacity: 0.3;
   cursor: not-allowed;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #ddd;
 }
 
 .btn-secondary {
   padding: 14px 40px;
-  background: white;
-  color: #667eea;
-  border: 2px solid #667eea;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 600;
+  background: transparent;
+  color: #fff;
+  border: 1px solid #fff;
+  border-radius: 2px;
+  font-size: 14px;
+  letter-spacing: 2px;
   cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-secondary:hover {
+  background: #fff;
+  color: #000;
 }
 
 .btn-close {
   flex: 1;
   padding: 14px;
-  background: #f0f0f0;
+  background: transparent;
   color: #666;
-  border: none;
-  border-radius: 8px;
-  font-size: 16px;
+  border: 1px solid #333;
+  border-radius: 2px;
+  font-size: 14px;
+  letter-spacing: 2px;
   cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-close:hover {
+  border-color: #555;
+  color: #fff;
 }
 </style>
