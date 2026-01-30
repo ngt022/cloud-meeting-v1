@@ -2,16 +2,7 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-// Use /tmp for database (writable in most containers)
 const dbPath = process.env.DB_PATH || path.join('/tmp', 'meeting.db');
-
-console.log('Database path:', dbPath);
-
-const dataDir = path.dirname(dbPath);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-  console.log('Created data directory:', dataDir);
-}
 
 let db = null;
 let SQL = null;
@@ -22,18 +13,27 @@ const initDb = async () => {
   SQL = await initSqlJs();
   
   if (fs.existsSync(dbPath)) {
-    console.log('Loading existing database');
+    console.log('Loading existing database from:', dbPath);
     const buffer = fs.readFileSync(dbPath);
     db = new SQL.Database(buffer);
   } else {
-    console.log('Creating new database');
+    console.log('Creating new database at:', dbPath);
     db = new SQL.Database();
-    db.run(`CREATE TABLE IF NOT EXISTS meetings (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, hostName TEXT NOT NULL, meetingNo TEXT UNIQUE NOT NULL, password TEXT, status TEXT DEFAULT 'waiting', actualStartTime TEXT, actualEndTime TEXT, maxParticipants INTEGER DEFAULT 100, createdAt TEXT DEFAULT CURRENT_TIMESTAMP)`);
-    db.run(`CREATE TABLE IF NOT EXISTS participants (id INTEGER PRIMARY KEY AUTOINCREMENT, meetingId INTEGER NOT NULL, name TEXT NOT NULL, isHost INTEGER DEFAULT 0, joinedAt TEXT DEFAULT CURRENT_TIMESTAMP)`);
-    db.run(`CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, meetingId INTEGER NOT NULL, senderName TEXT NOT NULL, content TEXT NOT NULL, createdAt TEXT DEFAULT CURRENT_TIMESTAMP)`);
+    db.run(`CREATE TABLE IF NOT EXISTS meetings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+      title TEXT NOT NULL, 
+      hostName TEXT NOT NULL, 
+      meetingNo TEXT UNIQUE NOT NULL, 
+      password TEXT, 
+      status TEXT DEFAULT 'waiting', 
+      actualStartTime TEXT, 
+      actualEndTime TEXT, 
+      maxParticipants INTEGER DEFAULT 100, 
+      createdAt TEXT DEFAULT CURRENT_TIMESTAMP
+    )`);
+    saveDb();
   }
-  saveDb();
-  console.log('Database initialized');
+  console.log('Database initialized, row count:', db.exec('SELECT COUNT(*) FROM meetings')[0].values[0][0]);
   return db;
 };
 
@@ -43,9 +43,9 @@ const saveDb = () => {
       const data = db.export();
       const buffer = Buffer.from(data);
       fs.writeFileSync(dbPath, buffer);
-      console.log('Database saved:', dbPath);
+      console.log('Database saved');
     } catch (err) {
-      console.error('Failed to save database:', err);
+      console.error('Save failed:', err.message);
     }
   }
 };
@@ -55,34 +55,33 @@ const generateMeetingNo = () => Math.random().toString().substring(2, 12);
 const createMeeting = (title, hostName, password) => {
   const meetingNo = generateMeetingNo();
   const actualStartTime = new Date().toISOString();
-  console.log('Creating meeting:', title, meetingNo);
+  console.log('Creating meeting:', meetingNo, title);
   
   db.run('INSERT INTO meetings (title, hostName, meetingNo, password, status, actualStartTime, maxParticipants, createdAt) VALUES (?,?,?,?,?,?,?,?)', 
     [title, hostName, meetingNo, password || null, 'waiting', actualStartTime, 100, new Date().toISOString()]);
   
-  const result = db.exec(`SELECT id FROM meetings WHERE meetingNo = '${meetingNo}'`);
-  let id = 0;
-  if (result.length > 0 && result[0].values.length > 0) {
-    id = result[0].values[0][0];
-  }
-  
   saveDb();
-  console.log('Meeting created with id:', id);
-  return { id, meetingNo, title, hostName };
+  
+  // Verify by querying all meetings
+  const all = db.exec('SELECT id, meetingNo, title FROM meetings');
+  console.log('All meetings after insert:', all.length > 0 ? all[0].values : 'none');
+  
+  // Return meeting info
+  return { id: Date.now(), meetingNo, title, hostName };
 };
 
 const getMeetingByNo = (meetingNo) => {
-  console.log('Looking for meeting:', meetingNo);
+  console.log('Querying meeting:', meetingNo);
   const stmt = db.prepare('SELECT * FROM meetings WHERE meetingNo = ?');
   stmt.bind([meetingNo]);
   if (stmt.step()) {
     const row = stmt.getAsObject();
     stmt.free();
-    console.log('Found meeting:', row);
+    console.log('Found:', row);
     return row;
   }
   stmt.free();
-  console.log('Meeting not found');
+  console.log('Not found');
   return null;
 };
 
@@ -108,15 +107,8 @@ const updateMeetingStatus = (id, status) => {
 const addParticipant = (meetingId, name, isHost) => {
   const joinedAt = new Date().toISOString();
   db.run('INSERT INTO participants (meetingId, name, isHost, joinedAt) VALUES (?,?,?,?)', [meetingId, name, isHost ? 1 : 0, joinedAt]);
-  
-  const result = db.exec(`SELECT id FROM participants WHERE meetingId = ${meetingId} AND name = '${name}' ORDER BY id DESC LIMIT 1`);
-  let id = 0;
-  if (result.length > 0 && result[0].values.length > 0) {
-    id = result[0].values[0][0];
-  }
-  
   saveDb();
-  return { id, meetingId, name, isHost: !!isHost, joinedAt };
+  return { id: Date.now(), meetingId, name, isHost: !!isHost, joinedAt };
 };
 
 const getParticipants = (meetingId) => {
@@ -133,15 +125,8 @@ const getParticipants = (meetingId) => {
 const addChatMessage = (meetingId, senderName, content) => {
   const createdAt = new Date().toISOString();
   db.run('INSERT INTO chat_messages (meetingId, senderName, content, createdAt) VALUES (?,?,?,?)', [meetingId, senderName, content, createdAt]);
-  
-  const result = db.exec(`SELECT id FROM chat_messages WHERE meetingId = ${meetingId} ORDER BY id DESC LIMIT 1`);
-  let id = 0;
-  if (result.length > 0 && result[0].values.length > 0) {
-    id = result[0].values[0][0];
-  }
-  
   saveDb();
-  return { id, meetingId, senderName, content, createdAt };
+  return { id: Date.now(), meetingId, senderName, content, createdAt };
 };
 
 const getChatMessages = (meetingId) => {
