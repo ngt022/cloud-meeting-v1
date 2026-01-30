@@ -1,36 +1,42 @@
 <template>
   <div class="join">
-    <div class="join-card">
-      <h1>📹 CloudMeeting</h1>
-      <p>输入会议号加入会议</p>
+    <div class="container">
+      <h1>加入会议</h1>
       
-      <div class="form">
-        <input 
-          v-model="name" 
-          placeholder="您的名称"
-          maxlength="20"
-          @input="saveName"
-        />
+      <div class="form-group">
+        <label>会议号</label>
         <input 
           v-model="meetingNo" 
-          placeholder="会议号"
+          placeholder="请输入会议号"
           maxlength="12"
-          @input="meetingNo = meetingNo.replace(/\D/g, '')"
         />
+      </div>
+
+      <div class="form-group">
+        <label>您的名称</label>
+        <input 
+          v-model="name" 
+          placeholder="请输入您的名称"
+          maxlength="20"
+        />
+      </div>
+
+      <div class="form-group" v-if="needsPassword">
+        <label>会议密码</label>
         <input 
           v-model="password" 
           type="password"
-          placeholder="会议密码 (可选)"
-          maxlength="10"
+          placeholder="请输入会议密码"
         />
-        <button @click="handleJoin" :disabled="!canJoin || joining">
-          {{ joining ? '加入中...' : '加入会议' }}
-        </button>
       </div>
+
+      <button class="btn-primary" @click="checkMeeting" :disabled="!canCheck">
+        下一步
+      </button>
       
-      <div class="back" @click="$router.push('/')">
+      <button class="btn-back" @click="$router.push('/')">
         返回首页
-      </div>
+      </button>
     </div>
   </div>
 </template>
@@ -42,54 +48,72 @@ import { useRoute, useRouter } from 'vue-router'
 const route = useRoute()
 const router = useRouter()
 
-const name = ref('')
 const meetingNo = ref('')
+const name = ref('')
 const password = ref('')
-const joining = ref(false)
+const needsPassword = ref(false)
+const meetingId = ref(null)
+const meetingData = ref(null)
 
-const canJoin = computed(() => name.value.trim() && meetingNo.value.length === 12)
+const canCheck = computed(() => meetingNo.value.trim() && name.value.trim())
 
-const saveName = () => {
-  localStorage.setItem('userName', name.value)
-}
+onMounted(() => {
+  if (route.params.no) {
+    meetingNo.value = route.params.no
+  }
+})
 
-const handleJoin = async () => {
-  if (!canJoin.value) return
-  joining.value = true
+const checkMeeting = async () => {
+  if (!canCheck.value) return
   
   try {
-    localStorage.setItem('userName', name.value)
-    
     const res = await fetch(`/api/meetings/${meetingNo.value}`)
     const data = await res.json()
     
     if (data.success) {
-      const joinRes = await fetch(`/api/meetings/${data.data.meeting.id}/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.value, password: password.value })
-      })
-      const joinData = await joinRes.json()
-      if (joinData.success) {
-        router.push(`/meeting/${data.data.meeting.id}`)
-      } else {
-        alert(joinData.message || '加入失败')
+      meetingData.value = data.data.meeting
+      meetingId.value = data.data.meeting.id
+      needsPassword.value = !!data.data.meeting.password
+      
+      if (!needsPassword.value) {
+        joinMeeting()
       }
     } else {
       alert(data.message || '会议不存在')
     }
   } catch (e) {
-    alert('加入失败')
+    alert('检查会议失败')
   }
-  joining.value = false
 }
 
-onMounted(() => {
-  name.value = localStorage.getItem('userName') || ''
-  if (route.params.meetingNo) {
-    meetingNo.value = route.params.meetingNo
+const joinMeeting = async () => {
+  try {
+    const res = await fetch(`/api/meetings/${meetingId.value}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name.value,
+        password: password.value || undefined
+      })
+    })
+    const data = await res.json()
+    
+    if (data.success) {
+      router.push({
+        path: '/meeting',
+        query: { 
+          no: meetingNo.value,
+          id: meetingId.value,
+          name: name.value
+        }
+      })
+    } else {
+      alert(data.message || '加入失败')
+    }
+  } catch (e) {
+    alert('加入失败')
   }
-})
+}
 </script>
 
 <style scoped>
@@ -102,52 +126,70 @@ onMounted(() => {
   padding: 20px;
 }
 
-.join-card {
-  background: rgba(255,255,255,0.95);
-  backdrop-filter: blur(20px);
-  border-radius: 24px;
-  padding: 48px;
+.container {
+  background: white;
+  padding: 40px;
+  border-radius: 16px;
   width: 100%;
   max-width: 400px;
-  text-align: center;
 }
 
-h1 { font-size: 32px; margin-bottom: 8px; color: #1a1a2e; }
-p { color: #64748b; margin-bottom: 32px; }
+h1 {
+  text-align: center;
+  margin-bottom: 32px;
+  color: #333;
+}
 
-.form { display: flex; flex-direction: column; gap: 16px; }
+.form-group {
+  margin-bottom: 20px;
+}
 
-input {
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 14px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.form-group input:focus {
+  border-color: #667eea;
+  outline: none;
+}
+
+.btn-primary {
   width: 100%;
   padding: 16px;
-  border: 2px solid #e5e7eb;
-  border-radius: 12px;
-  font-size: 16px;
-  transition: all 0.3s;
-}
-
-input:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 4px rgba(102,126,234,0.1); }
-
-button {
-  padding: 16px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #fff;
+  color: white;
   border: none;
-  border-radius: 12px;
-  font-size: 16px;
+  border-radius: 8px;
+  font-size: 18px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.3s;
+  margin-bottom: 12px;
 }
 
-button:hover:not(:disabled) { opacity: 0.9; transform: translateY(-2px); }
-button:disabled { opacity: 0.6; cursor: not-allowed; }
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
-.back {
-  margin-top: 24px;
-  color: #667eea;
+.btn-back {
+  width: 100%;
+  padding: 14px;
+  background: #f0f0f0;
+  color: #666;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
   cursor: pointer;
 }
-
-.back:hover { text-decoration: underline; }
 </style>
