@@ -14,6 +14,27 @@
       </button>
     </div>
 
+    <!-- 会议历史 -->
+    <div class="history-section" v-if="history.length > 0">
+      <h3>最近会议</h3>
+      <div class="history-list">
+        <div 
+          v-for="item in history" 
+          :key="item.meetingNo"
+          class="history-item"
+          @click="quickJoin(item)"
+        >
+          <div class="history-info">
+            <span class="history-title">{{ item.title }}</span>
+            <span class="history-no">{{ item.meetingNo }}</span>
+            <span class="history-time">{{ formatTime(item.time) }}</span>
+          </div>
+          <button class="btn-join">加入</button>
+        </div>
+      </div>
+      <button class="btn-clear" @click="clearHistory">清除历史</button>
+    </div>
+
     <!-- 创建会议弹窗 -->
     <div class="modal" v-if="showCreateModal" @click.self="showCreateModal = false">
       <div class="modal-content">
@@ -67,7 +88,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -75,12 +96,64 @@ const showCreateModal = ref(false)
 const showJoinModal = ref(false)
 const creating = ref(false)
 const joining = ref(false)
+const history = ref([])
 
 const createForm = ref({ title: '', name: '', password: '' })
 const joinForm = ref({ no: '', name: '', password: '' })
 
 const canCreate = computed(() => createForm.value.title.trim() && createForm.value.name.trim())
 const canJoin = computed(() => joinForm.value.no.trim() && joinForm.value.name.trim())
+
+onMounted(() => {
+  loadHistory()
+})
+
+const loadHistory = () => {
+  try {
+    const saved = localStorage.getItem('meeting_history')
+    if (saved) {
+      history.value = JSON.parse(saved)
+    }
+  } catch (e) {
+    console.error('Failed to load history:', e)
+  }
+}
+
+const saveHistory = (meeting) => {
+  // Remove if exists
+  history.value = history.value.filter(h => h.meetingNo !== meeting.meetingNo)
+  // Add to front
+  history.value.unshift({
+    ...meeting,
+    time: Date.now()
+  })
+  // Keep only 10 items
+  history.value = history.value.slice(0, 10)
+  // Save
+  localStorage.setItem('meeting_history', JSON.stringify(history.value))
+}
+
+const clearHistory = () => {
+  if (confirm('确定清除所有历史记录？')) {
+    history.value = []
+    localStorage.removeItem('meeting_history')
+  }
+}
+
+const formatTime = (timestamp) => {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diff = now - date
+  
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
+  return `${Math.floor(diff / 86400000)}天前`
+}
+
+const quickJoin = async (item) => {
+  router.push(`/meeting/${item.meetingNo}`)
+}
 
 const createMeeting = async () => {
   if (!canCreate.value) return
@@ -101,6 +174,13 @@ const createMeeting = async () => {
     if (data.success) {
       showCreateModal.value = false
       createForm.value = { title: '', name: '', password: '' }
+      
+      // Save to history
+      saveHistory({
+        title: data.data.title,
+        meetingNo: data.data.meetingNo
+      })
+      
       router.push(`/meeting/${data.data.meetingNo}`)
     } else {
       alert(data.message || '创建失败')
@@ -144,6 +224,13 @@ const joinMeeting = async () => {
       if (joinData.success) {
         showJoinModal.value = false
         joinForm.value = { no: '', name: '', password: '' }
+        
+        // Save to history
+        saveHistory({
+          title: meeting.title,
+          meetingNo: meeting.meetingNo
+        })
+        
         router.push(`/meeting/${meeting.meetingNo}`)
       } else {
         alert(joinData.message || '加入失败')
@@ -191,12 +278,108 @@ const joinMeeting = async () => {
 .actions {
   display: flex;
   gap: 24px;
+  margin-bottom: 60px;
 }
 
 button.large {
   padding: 18px 56px;
   font-size: 16px;
   letter-spacing: 2px;
+}
+
+.history-section {
+  width: 100%;
+  max-width: 480px;
+}
+
+.history-section h3 {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 16px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.history-list {
+  border: 1px solid #222;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #141414;
+  border-bottom: 1px solid #222;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-item:hover {
+  background: #1a1a1a;
+}
+
+.history-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-title {
+  color: #fff;
+  font-size: 14px;
+}
+
+.history-no {
+  color: #888;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.history-time {
+  color: #555;
+  font-size: 12px;
+}
+
+.btn-join {
+  padding: 8px 20px;
+  background: #fff;
+  color: #000;
+  border: none;
+  border-radius: 2px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-join:hover {
+  background: #ddd;
+}
+
+.btn-clear {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px;
+  background: transparent;
+  color: #555;
+  border: 1px solid #222;
+  border-radius: 2px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-clear:hover {
+  border-color: #444;
+  color: #888;
 }
 
 .modal {
