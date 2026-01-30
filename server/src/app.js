@@ -25,6 +25,38 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
 
+// Debug endpoint
+app.get('/api/debug', (req, res) => {
+  const { db } = require('./models');
+  res.json({ 
+    message: 'Server is running',
+    dbExists: !!db,
+    dbType: db ? db.constructor.name : null
+  });
+});
+
+// Test endpoint to create and query a meeting
+app.get('/api/test', (req, res) => {
+  const testNo = 'TEST12345678';
+  
+  // Try to get existing
+  let meeting = getMeetingByNo(testNo);
+  
+  if (!meeting) {
+    console.log('Creating test meeting...');
+    const result = createMeeting('Test Meeting', 'Test Host', null);
+    console.log('Created:', result);
+    meeting = getMeetingByNo(testNo);
+    console.log('Found after create:', meeting);
+  }
+  
+  res.json({ 
+    success: true, 
+    meeting,
+    testNo 
+  });
+});
+
 app.post('/api/meetings', (req, res) => {
   try {
     const { title, hostName, password } = req.body;
@@ -33,6 +65,12 @@ app.post('/api/meetings', (req, res) => {
     }
 
     const meeting = createMeeting(title, hostName, password || null);
+    console.log('Created meeting:', meeting);
+    
+    // Verify it was saved
+    const saved = getMeetingByNo(meeting.meetingNo);
+    console.log('Saved meeting:', saved);
+
     addParticipant(meeting.id, hostName, true);
 
     res.json({
@@ -46,13 +84,14 @@ app.post('/api/meetings', (req, res) => {
     });
   } catch (error) {
     console.error('创建会议失败:', error);
-    res.status(500).json({ success: false, message: '创建会议失败' });
+    res.status(500).json({ success: false, message: '创建会议失败: ' + error.message });
   }
 });
 
 app.get('/api/meetings/:meetingNo', (req, res) => {
   try {
     const meeting = getMeetingByNo(req.params.meetingNo);
+    console.log('Get meeting:', req.params.meetingNo, meeting);
 
     if (!meeting) {
       return res.status(404).json({ success: false, message: '会议不存在' });
@@ -192,7 +231,6 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Wait for database init before starting server
 initDb().then(() => {
   console.log('Database initialized');
   httpServer.listen(PORT, () => {
