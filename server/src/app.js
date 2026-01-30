@@ -31,7 +31,7 @@ initDb().then(() => {
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-app.use(express.static('dist'));
+app.use(express.static(path.join(__dirname, '../../dist')));
 
 // API 路由
 app.post('/api/meetings', (req, res) => {
@@ -48,8 +48,8 @@ app.post('/api/meetings', (req, res) => {
       success: true,
       data: {
         meetingId: meeting.id,
-        meetingNo: meeting.meetingNo,
-        title: meeting.title,
+ meeting.meetingNo,
+        title:        meetingNo: meeting.title,
         hostName: meeting.hostName
       }
     });
@@ -196,9 +196,9 @@ io.on('connection', (socket) => {
   });
 });
 
-// 前端路由
+// 前端路由 (SPA)
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../dist/index.html'));
+  res.sendFile(path.join(__dirname, '../../dist/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
