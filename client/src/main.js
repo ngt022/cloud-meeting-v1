@@ -6,7 +6,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: () => import('./views/HomeView.vue') },
-    { path: '/meeting/:id', component: () => import('./views/MeetingView.vue') },
+    { path: '/meeting/:no', component: () => import('./views/MeetingView.vue') },
     { path: '/join/:meetingNo?', component: () => import('./views/JoinView.vue') }
   ]
 })
