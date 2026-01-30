@@ -7,8 +7,9 @@ const { Server } = require('socket.io');
 const path = require('path');
 
 const { 
+  initDb,
   createMeeting, getMeetingByNo, getMeetingById, updateMeetingStatus,
-  addParticipant, getParticipants, removeParticipant,
+  addParticipant, getParticipants,
   addChatMessage, getChatMessages
 } = require('./models');
 
@@ -17,6 +18,13 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
+});
+
+// 初始化数据库
+initDb().then(() => {
+  console.log('Database initialized');
+}).catch(err => {
+  console.error('Database init failed:', err);
 });
 
 // 中间件
@@ -97,7 +105,6 @@ app.post('/api/meetings/:id/join', (req, res) => {
     }
 
     const participant = addParticipant(meeting.id, name, false);
-
     if (meeting.status === 'waiting') {
       updateMeetingStatus(meeting.id, 'ongoing');
     }
@@ -143,7 +150,6 @@ io.on('connection', (socket) => {
     socket.emit('room-users', users);
   });
 
-  // WebRTC 信令
   socket.on('offer', ({ meetingId, offer, targetSocketId }) => {
     socket.to(targetSocketId).emit('offer', { offer, from: socket.id });
   });
@@ -156,7 +162,6 @@ io.on('connection', (socket) => {
     socket.to(targetSocketId).emit('ice-candidate', { candidate, from: socket.id });
   });
 
-  // 聊天消息
   socket.on('chat-message', ({ meetingId, senderName, content }) => {
     const chat = addChatMessage(meetingId, senderName, content);
     io.to(`room:${meetingId}`).emit('chat-message', { 
@@ -166,7 +171,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 离开会议
   socket.on('leave-room', ({ meetingId }) => {
     socket.leave(`room:${meetingId}`);
     const room = rooms.get(meetingId);
@@ -194,7 +198,7 @@ io.on('connection', (socket) => {
 
 // 前端路由
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../dist/index.html'));
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
