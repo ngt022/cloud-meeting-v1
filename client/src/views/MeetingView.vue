@@ -77,8 +77,11 @@
       <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
         聊天
       </button>
-      <button class="control-btn danger" @click="leaveMeeting">
-        离开
+      <button v-if="isHost" class="control-btn danger" @click="endMeeting">
+        结束会议
+      </button>
+      <button class="control-btn leave" @click="leaveMeeting">
+        {{ isHost ? '离开' : '退出' }}
       </button>
     </footer>
 
@@ -119,9 +122,10 @@ const localParticipantId = ref(null)
 const copied = ref(false)
 const isHost = ref(false)
 const locked = ref(false)
+const meetingEnded = ref(false)
 
 const socket = ref(null)
-const isMuted = ref(true) // 默认静音
+const isMuted = ref(true)
 const showChat = ref(false)
 const chatMsg = ref('')
 const duration = ref('00:00')
@@ -164,6 +168,25 @@ const toggleLock = async () => {
   }
 }
 
+const endMeeting = async () => {
+  if (!confirm('确定要结束会议吗？所有参会者将被移出，会议数据将被清除。')) {
+    return
+  }
+  
+  try {
+    await fetch(`/api/meetings/${meeting.value.id}/end`, { method: 'POST' })
+    socket.value?.emit('leave-room', { meetingId: route.params.no })
+    socket.value?.disconnect()
+    if (window.localAudioStream) {
+      window.localAudioStream.getTracks().forEach(t => t.stop())
+    }
+    alert('会议已结束')
+    router.push('/')
+  } catch (e) {
+    console.error('结束会议失败:', e)
+  }
+}
+
 const muteParticipant = async (user) => {
   const mute = !user.muted
   try {
@@ -192,7 +215,6 @@ const removeParticipant = async (user) => {
 const initAudio = async () => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    // 保存音频流但不自动播放，等待主持人允许
     window.localAudioStream = stream
   } catch (e) {
     console.warn('无法访问麦克风:', e)
@@ -229,7 +251,6 @@ const connectSocket = () => {
   })
 
   socket.value.on('participant-muted', ({ participantId, muted }) => {
-    // 如果是自己被静音
     if (participantId === localParticipantId.value) {
       isMuted.value = muted
       if (window.localAudioStream) {
@@ -267,6 +288,16 @@ const connectSocket = () => {
     messages.value.push({ name: '系统', content: '会议已解锁，所有参会者可以发言', isSelf: false })
   })
 
+  socket.value.on('meeting-ended', () => {
+    meetingEnded.value = true
+    alert('会议已结束')
+    socket.value?.disconnect()
+    if (window.localAudioStream) {
+      window.localAudioStream.getTracks().forEach(t => t.stop())
+    }
+    router.push('/')
+  })
+
   socket.value.on('chat-message', (msg) => {
     messages.value.push(msg)
     nextTick(() => {
@@ -279,21 +310,18 @@ const fetchMeeting = async () => {
   try {
     const res = await fetch(`/api/meetings/${route.params.no}`)
     const data = await res.json()
+    
     if (data.success) {
       meeting.value = data.data.meeting
-      
       const myName = route.query.name || localStorage.getItem('userName') || ''
       isHost.value = data.data.meeting.hostName === myName
-      
-      // 主持人默认可以发言，其他人默认静音
       if (!isHost.value) {
         isMuted.value = true
       }
-      
       localParticipantId.value = Date.now()
       messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
     } else {
-      alert('会议不存在')
+      alert('会议不存在或已结束')
       router.push('/')
     }
   } catch (e) {
@@ -310,11 +338,6 @@ const toggleMute = () => {
   isMuted.value = !isMuted.value
   if (window.localAudioStream) {
     window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
-  }
-  
-  // 通知其他人
-  if (socket.value) {
-    socket.value.emit('mute-self', { muted: isMuted.value })
   }
 }
 
@@ -561,6 +584,8 @@ onUnmounted(() => {
 .control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .control-btn.danger { background: #ff4d4f; }
 .control-btn.danger:hover { background: #ff6b6b; }
+.control-btn.leave { background: #444; }
+.control-btn.leave:hover { background: #555; }
 
 .chat-panel {
   position: fixed;
