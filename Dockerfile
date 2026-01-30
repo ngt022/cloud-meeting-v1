@@ -27,5 +27,5 @@ WORKDIR /app
 # 暴露端口
 EXPOSE 3000
 
-# 启动
-CMD ["node", "src/app.js"]
+# 启动 (从 server 目录运行)
+CMD ["node", "server/src/app.js"]
