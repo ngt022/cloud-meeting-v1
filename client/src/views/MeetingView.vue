@@ -8,7 +8,7 @@
       </div>
       <div class="header-actions">
         <span class="time">{{ duration }}</span>
-        <span class="users">👥 {{ participants.length + 1 }}人</span>
+        <span class="users">{{ participants.length + 1 }}人</span>
       </div>
     </header>
 
@@ -18,7 +18,8 @@
       <div class="main-video">
         <video ref="localVideo" autoplay muted playsinline></video>
         <div class="video-label">
-          <span>我 {{ isMuted ? '🔇' : '' }}</span>
+          <span>{{ localName || '我' }}</span>
+          <span v-if="isMuted" class="muted-icon">静音</span>
         </div>
       </div>
 
@@ -41,19 +42,19 @@
     <!-- 控制栏 -->
     <footer class="controls">
       <button :class="['control-btn', isMuted && 'active']" @click="toggleMute">
-        {{ isMuted ? '🔇' : '🎤' }}
+        {{ isMuted ? '静音' : '麦克风' }}
       </button>
       <button :class="['control-btn', isVideoOff && 'active']" @click="toggleVideo">
-        {{ isVideoOff ? '📷' : '📹' }}
+        {{ isVideoOff ? '关闭' : '摄像头' }}
       </button>
       <button :class="['control-btn', isScreenSharing && 'active']" @click="toggleScreenShare">
-        🖥️
+        共享
       </button>
       <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
-        💬
+        聊天
       </button>
       <button class="control-btn danger" @click="leaveMeeting">
-        📴
+        离开
       </button>
     </footer>
 
@@ -61,7 +62,7 @@
     <aside class="chat-panel" v-if="showChat">
       <div class="chat-header">
         <span>聊天</span>
-        <button @click="showChat = false">×</button>
+        <button @click="showChat = false">X</button>
       </div>
       <div class="chat-messages" ref="chatContainer">
         <div v-for="(msg, i) in messages" :key="i" :class="['chat-msg', msg.isSelf && 'self']">
@@ -91,6 +92,7 @@ const messages = ref([])
 const localVideo = ref(null)
 const videoRefs = ref({})
 const chatContainer = ref(null)
+const localName = ref('')
 
 const socket = ref(null)
 const isMuted = ref(false)
@@ -123,7 +125,7 @@ const connectSocket = () => {
     socket.value.emit('join-room', {
       meetingId: route.params.no,
       participantId: Date.now(),
-      participantName: localStorage.getItem('userName') || '匿名'
+      participantName: localName.value || '匿名'
     })
   })
 
@@ -248,7 +250,7 @@ const toggleScreenShare = async () => {
 
 const sendMessage = async () => {
   if (!chatMsg.value.trim()) return
-  const name = localStorage.getItem('userName') || '匿名'
+  const name = localName.value || '匿名'
   socket.value.emit('chat-message', { meetingId: route.params.no, senderName: name, content: chatMsg.value })
   messages.value.push({ name: name, content: chatMsg.value, isSelf: true })
   chatMsg.value = ''
@@ -269,6 +271,7 @@ const updateDuration = () => {
 }
 
 onMounted(async () => {
+  localName.value = route.query.name || localStorage.getItem('userName') || ''
   await fetchMeeting()
   await initMedia()
   connectSocket()
@@ -288,7 +291,7 @@ onUnmounted(() => {
 <style scoped>
 .meeting {
   height: 100vh;
-  background: #0f0f1a;
+  background: #0a0a0a;
   display: flex;
   flex-direction: column;
   margin: -20px;
@@ -298,112 +301,160 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
-  background: rgba(255,255,255,0.05);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 16px 24px;
+  background: #141414;
+  border-bottom: 1px solid #222;
 }
 
-.meeting-info .title { color: #fff; font-size: 16px; font-weight: 500; margin-right: 16px; }
-.meeting-info .meeting-no { color: rgba(255,255,255,0.5); font-size: 14px; }
-.header-actions { display: flex; gap: 16px; color: rgba(255,255,255,0.7); font-size: 14px; }
+.meeting-info .title { color: #fff; font-size: 16px; font-weight: 500; margin-right: 20px; }
+.meeting-info .meeting-no { color: #666; font-size: 14px; }
+.header-actions { display: flex; gap: 24px; color: #888; font-size: 14px; }
 
 .video-container {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 12px;
+  padding: 20px;
+  gap: 16px;
 }
 
-.video-container.with-chat { margin-right: 320px; }
+.video-container.with-chat { margin-right: 340px; }
 
 .main-video {
   flex: 1;
-  background: #1a1a2e;
-  border-radius: 16px;
+  background: #141414;
+  border-radius: 4px;
   position: relative;
   overflow: hidden;
+  border: 1px solid #222;
 }
 
 .main-video video { width: 100%; height: 100%; object-fit: cover; }
-.video-label { position: absolute; bottom: 12px; left: 12px; background: rgba(0,0,0,0.5); padding: 6px 12px; border-radius: 6px; color: #fff; font-size: 14px; }
+.video-label { 
+  position: absolute; 
+  bottom: 16px; 
+  left: 16px; 
+  background: rgba(0,0,0,0.6); 
+  padding: 8px 14px; 
+  border-radius: 2px; 
+  color: #fff; 
+  font-size: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.muted-icon { color: #ff4d4f; font-size: 12px; }
 
-.participants { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
-.participant { width: 120px; height: 80px; flex-shrink: 0; cursor: pointer; }
-.participant-video { width: 100%; height: 100%; background: #1a1a2e; border-radius: 8px; overflow: hidden; position: relative; }
+.participants { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 4px; }
+.participant { width: 140px; height: 90px; flex-shrink: 0; cursor: pointer; }
+.participant-video { width: 100%; height: 100%; background: #141414; border-radius: 4px; overflow: hidden; position: relative; border: 1px solid #222; }
 .participant-video video { width: 100%; height: 100%; object-fit: cover; }
-.participant-video .video-label { font-size: 12px; padding: 4px 8px; }
+.participant-video .video-label { font-size: 12px; padding: 6px 10px; }
 
 .controls {
   display: flex;
   justify-content: center;
-  gap: 16px;
-  padding: 16px;
-  background: rgba(255,255,255,0.05);
-  border-top: 1px solid rgba(255,255,255,0.1);
+  gap: 20px;
+  padding: 20px;
+  background: #141414;
+  border-top: 1px solid #222;
 }
 
 .control-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
   border: none;
-  background: rgba(255,255,255,0.1);
+  background: #222;
   color: #fff;
-  font-size: 24px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.3s;
+  letter-spacing: 1px;
 }
 
-.control-btn:hover { background: rgba(255,255,255,0.2); }
-.control-btn.active { background: #ff4d4f; }
+.control-btn:hover { background: #333; }
+.control-btn.active { background: #fff; color: #000; }
 .control-btn.danger { background: #ff4d4f; }
+.control-btn.danger:hover { background: #ff6b6b; }
 
 .chat-panel {
   position: fixed;
   right: 0;
   top: 0;
-  width: 320px;
+  width: 340px;
   height: 100vh;
-  background: #fff;
+  background: #141414;
   display: flex;
   flex-direction: column;
   z-index: 10;
+  border-left: 1px solid #222;
 }
 
 .chat-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
-  border-bottom: 1px solid #e5e7eb;
-  font-weight: 600;
+  padding: 20px;
+  border-bottom: 1px solid #222;
+  font-weight: 500;
+  color: #fff;
+  letter-spacing: 2px;
 }
 
-.chat-header button { width: 32px; height: 32px; border-radius: 50%; border: none; background: #f3f4f6; font-size: 20px; cursor: pointer; }
+.chat-header button { 
+  width: 32px; 
+  height: 32px; 
+  border-radius: 2px; 
+  border: 1px solid #333; 
+  background: transparent; 
+  color: #888; 
+  font-size: 16px; 
+  cursor: pointer; 
+}
 
-.chat-messages { flex: 1; overflow-y: auto; padding: 16px; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 20px; }
 
-.chat-msg { margin-bottom: 12px; }
-.chat-msg .sender { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
-.chat-msg .content { display: inline-block; padding: 10px 14px; background: #f3f4f6; border-radius: 12px; font-size: 14px; }
+.chat-msg { margin-bottom: 16px; }
+.chat-msg .sender { display: block; font-size: 12px; color: #666; margin-bottom: 6px; }
+.chat-msg .content { display: inline-block; padding: 12px 16px; background: #222; border-radius: 4px; font-size: 14px; color: #fff; }
 .chat-msg.self { text-align: right; }
-.chat-msg.self .content { background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; }
+.chat-msg.self .content { background: #fff; color: #000; }
 
 .chat-input {
   display: flex;
-  gap: 8px;
-  padding: 12px;
-  border-top: 1px solid #e5e7eb;
+  gap: 12px;
+  padding: 16px;
+  border-top: 1px solid #222;
 }
 
-.chat-input input { flex: 1; padding: 10px 14px; border: 1px solid #e5e7eb; border-radius: 8px; outline: none; }
-.chat-input button { padding: 10px 20px; background: #667eea; color: #fff; border: none; border-radius: 8px; cursor: pointer; }
+.chat-input input { 
+  flex: 1; 
+  padding: 12px 16px; 
+  background: #0a0a0a; 
+  border: 1px solid #222; 
+  border-radius: 2px; 
+  outline: none; 
+  color: #fff;
+  font-size: 14px;
+}
+.chat-input input::placeholder { color: #444; }
+
+.chat-input button { 
+  padding: 12px 24px; 
+  background: #fff; 
+  color: #000; 
+  border: none; 
+  border-radius: 2px; 
+  cursor: pointer; 
+  letter-spacing: 1px;
+  font-size: 14px;
+}
 
 @media (max-width: 768px) {
   .video-container.with-chat { margin-right: 0; }
   .chat-panel { width: 100%; }
   .participants { display: none; }
-  .control-btn { width: 48px; height: 48px; font-size: 20px; }
+  .control-btn { width: 56px; height: 56px; font-size: 11px; }
 }
 </style>
