@@ -42,8 +42,12 @@ const generateMeetingNo = () => Math.random().toString().substring(2, 12);
 const createMeeting = (title, hostName, password) => {
   const meetingNo = generateMeetingNo();
   const actualStartTime = new Date().toISOString();
-  db.run('INSERT INTO meetings VALUES (?,?,?,?,?,?,?,?,?,?)', [null, title, hostName, meetingNo, password || null, 'waiting', actualStartTime, null, 100, new Date().toISOString()]);
-  const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+  db.run('INSERT INTO meetings (title, hostName, meetingNo, password, status, actualStartTime, maxParticipants, createdAt) VALUES (?,?,?,?,?,?,?,?)', 
+    [title, hostName, meetingNo, password || null, 'waiting', actualStartTime, 100, new Date().toISOString()]);
+  
+  const result = db.exec('SELECT last_insert_rowid() as id');
+  const id = result.length > 0 ? result[0].values[0][0] : 0;
+  
   saveDb();
   return { id, meetingNo, title, hostName };
 };
@@ -81,8 +85,11 @@ const updateMeetingStatus = (id, status) => {
 
 const addParticipant = (meetingId, name, isHost) => {
   const joinedAt = new Date().toISOString();
-  db.run('INSERT INTO participants VALUES (?,?,?,?,?)', [null, meetingId, name, isHost ? 1 : 0, joinedAt]);
-  const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+  db.run('INSERT INTO participants (meetingId, name, isHost, joinedAt) VALUES (?,?,?,?)', [meetingId, name, isHost ? 1 : 0, joinedAt]);
+  
+  const result = db.exec('SELECT last_insert_rowid() as id');
+  const id = result.length > 0 ? result[0].values[0][0] : 0;
+  
   saveDb();
   return { id, meetingId, name, isHost: !!isHost, joinedAt };
 };
@@ -100,8 +107,11 @@ const getParticipants = (meetingId) => {
 
 const addChatMessage = (meetingId, senderName, content) => {
   const createdAt = new Date().toISOString();
-  db.run('INSERT INTO chat_messages VALUES (?,?,?,?,?)', [null, meetingId, senderName, content, createdAt]);
-  const id = db.exec('SELECT last_insert_rowid()')[0].values[0][0];
+  db.run('INSERT INTO chat_messages (meetingId, senderName, content, createdAt) VALUES (?,?,?,?)', [meetingId, senderName, content, createdAt]);
+  
+  const result = db.exec('SELECT last_insert_rowid() as id');
+  const id = result.length > 0 ? result[0].values[0][0] : 0;
+  
   saveDb();
   return { id, meetingId, senderName, content, createdAt };
 };
