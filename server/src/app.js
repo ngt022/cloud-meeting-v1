@@ -25,41 +25,32 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
 
-// 会议控制 - 静音/取消静音参会者
 app.post('/api/meetings/:id/mute/:participantId', (req, res) => {
   try {
     const { id, participantId } = req.params;
     const { mute } = req.body;
-    
     io.to(`room:${id}`).emit('participant-muted', { 
       participantId: parseInt(participantId), 
       muted: mute 
     });
-    
     res.json({ success: true });
   } catch (error) {
-    console.error('静音操作失败:', error);
     res.status(500).json({ success: false, message: '操作失败' });
   }
 });
 
-// 会议控制 - 移出参会者
 app.post('/api/meetings/:id/remove/:participantId', (req, res) => {
   try {
     const { id, participantId } = req.params;
-    
     io.to(`room:${id}`).emit('participant-removed', { 
       participantId: parseInt(participantId) 
     });
-    
     res.json({ success: true });
   } catch (error) {
-    console.error('移出操作失败:', error);
     res.status(500).json({ success: false, message: '操作失败' });
   }
 });
 
-// 会议控制 - 锁定/解锁会议
 app.post('/api/meetings/:id/lock', (req, res) => {
   try {
     const { id } = req.params;
@@ -86,10 +77,8 @@ app.post('/api/meetings', (req, res) => {
     if (!title || !hostName) {
       return res.status(400).json({ success: false, message: '请填写会议名称和您的名称' });
     }
-
     const meeting = createMeeting(title, hostName, password || null);
     addParticipant(meeting.id, hostName, true);
-
     res.json({
       success: true,
       data: {
@@ -100,7 +89,6 @@ app.post('/api/meetings', (req, res) => {
       }
     });
   } catch (error) {
-    console.error('创建会议失败:', error);
     res.status(500).json({ success: false, message: '创建会议失败' });
   }
 });
@@ -108,14 +96,11 @@ app.post('/api/meetings', (req, res) => {
 app.get('/api/meetings/:meetingNo', (req, res) => {
   try {
     const meeting = getMeetingByNo(req.params.meetingNo);
-
     if (!meeting) {
       return res.status(404).json({ success: false, message: '会议不存在' });
     }
-
     const participants = getParticipants(meeting.id);
     const chats = getChatMessages(meeting.id);
-
     res.json({
       success: true,
       data: {
@@ -132,7 +117,6 @@ app.get('/api/meetings/:meetingNo', (req, res) => {
       }
     });
   } catch (error) {
-    console.error('获取会议信息失败:', error);
     res.status(500).json({ success: false, message: '获取会议信息失败' });
   }
 });
@@ -141,20 +125,16 @@ app.post('/api/meetings/:id/join', (req, res) => {
   try {
     const { name, password } = req.body;
     const meeting = getMeetingById(req.params.id);
-
     if (!meeting) {
       return res.status(404).json({ success: false, message: '会议不存在' });
     }
-
     if (meeting.password && meeting.password !== password) {
       return res.status(401).json({ success: false, message: '会议密码错误' });
     }
-
     const participant = addParticipant(meeting.id, name, false);
     if (meeting.status === 'waiting') {
       updateMeetingStatus(meeting.id, 'ongoing');
     }
-
     res.json({
       success: true,
       data: {
@@ -163,7 +143,6 @@ app.post('/api/meetings/:id/join', (req, res) => {
       }
     });
   } catch (error) {
-    console.error('加入会议失败:', error);
     res.status(500).json({ success: false, message: '加入会议失败' });
   }
 });
@@ -172,32 +151,26 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// 房间状态管理
 const rooms = new Map();
 
 io.on('connection', (socket) => {
   socket.on('join-room', ({ meetingId, participantId, participantName, isHost }) => {
     socket.join(`room:${meetingId}`);
-    
     const room = rooms.get(meetingId) || new Map();
     room.set(socket.id, { 
       id: participantId, 
       name: participantName, 
       isHost: isHost || false,
-      muted: !isHost, // 非主持人默认静音
+      muted: !isHost,
       socketId: socket.id
     });
     rooms.set(meetingId, room);
-
-    // 通知其他人
     socket.to(`room:${meetingId}`).emit('user-joined', {
       socketId: socket.id,
       participantId,
       participantName,
       isHost
     });
-
-    // 返回当前房间的所有用户
     const users = Array.from(room.entries()).map(([id, user]) => ({
       socketId: id,
       ...user
@@ -208,8 +181,7 @@ io.on('connection', (socket) => {
   socket.on('mute-self', ({ meetingId, muted }) => {
     const room = rooms.get(meetingId);
     if (room && room.has(socket.id)) {
-      const user = room.get(socket.id);
-      user.muted = muted;
+      room.get(socket.id).muted = muted;
     }
   });
 
@@ -228,9 +200,7 @@ io.on('connection', (socket) => {
     if (room) {
       const user = room.get(socket.id);
       room.delete(socket.id);
-      if (room.size === 0) {
-        rooms.delete(meetingId);
-      }
+      if (room.size === 0) rooms.delete(meetingId);
       socket.to(`room:${meetingId}`).emit('user-left', { socketId: socket.id, participantId: user?.id });
     }
   });
@@ -241,16 +211,14 @@ io.on('connection', (socket) => {
         const user = room.get(socket.id);
         room.delete(socket.id);
         io.to(`room:${meetingId}`).emit('user-left', { socketId: socket.id, participantId: user?.id });
-        if (room.size === 0) {
-          rooms.delete(meetingId);
-        }
+        if (room.size === 0) rooms.delete(meetingId);
       }
     });
   });
 });
 
 app.get('*', (req, res) => {
-  res.sendFile, '../../dist/index(path.join(__dirname.html'));
+  res.sendFile(path.join(__dirname, '../../dist/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
