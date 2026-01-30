@@ -121,7 +121,7 @@ const connectSocket = () => {
   
   socket.value.on('connect', () => {
     socket.value.emit('join-room', {
-      meetingId: route.params.id,
+      meetingId: route.params.no,
       participantId: Date.now(),
       participantName: localStorage.getItem('userName') || '匿名'
     })
@@ -149,7 +149,7 @@ const connectSocket = () => {
     await pc.setRemoteDescription(new RTCSessionDescription(offer))
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    socket.value.emit('answer', { meetingId: route.params.id, answer, targetSocketId: from })
+    socket.value.emit('answer', { meetingId: route.params.no, answer, targetSocketId: from })
   })
 
   socket.value.on('answer', async ({ answer, from }) => {
@@ -178,7 +178,7 @@ const getPeerConnection = (targetSocketId) => {
     const pc = new RTCPeerConnection(config)
     pc.onicecandidate = (e) => {
       if (e.candidate) {
-        socket.value.emit('ice-candidate', { meetingId: route.params.id, candidate: e.candidate, targetSocketId })
+        socket.value.emit('ice-candidate', { meetingId: route.params.no, candidate: e.candidate, targetSocketId })
       }
     }
     pc.ontrack = (e) => {
@@ -199,7 +199,7 @@ const getPeerConnection = (targetSocketId) => {
 
 const fetchMeeting = async () => {
   try {
-    const res = await fetch(`/api/meetings/${route.params.id}`)
+    const res = await fetch(`/api/meetings/${route.params.no}`)
     const data = await res.json()
     if (data.success) {
       meeting.value = data.data.meeting
@@ -249,13 +249,13 @@ const toggleScreenShare = async () => {
 const sendMessage = async () => {
   if (!chatMsg.value.trim()) return
   const name = localStorage.getItem('userName') || '匿名'
-  socket.value.emit('chat-message', { meetingId: route.params.id, senderName: name, content: chatMsg.value })
+  socket.value.emit('chat-message', { meetingId: route.params.no, senderName: name, content: chatMsg.value })
   messages.value.push({ name: name, content: chatMsg.value, isSelf: true })
   chatMsg.value = ''
 }
 
 const leaveMeeting = () => {
-  socket.value?.emit('leave-room', { meetingId: route.params.id })
+  socket.value?.emit('leave-room', { meetingId: route.params.no })
   socket.value?.disconnect()
   router.push('/')
 }
