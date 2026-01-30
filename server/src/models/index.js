@@ -2,11 +2,15 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const dbPath = process.env.DB_PATH || path.join(__dirname, '../../data/meeting.db');
+// Use /tmp for database (writable in most containers)
+const dbPath = process.env.DB_PATH || path.join('/tmp', 'meeting.db');
+
+console.log('Database path:', dbPath);
 
 const dataDir = path.dirname(dbPath);
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
+  console.log('Created data directory:', dataDir);
 }
 
 let db = null;
@@ -14,26 +18,35 @@ let SQL = null;
 
 const initDb = async () => {
   if (db) return db;
+  console.log('Initializing database...');
   SQL = await initSqlJs();
   
   if (fs.existsSync(dbPath)) {
+    console.log('Loading existing database');
     const buffer = fs.readFileSync(dbPath);
     db = new SQL.Database(buffer);
   } else {
+    console.log('Creating new database');
     db = new SQL.Database();
     db.run(`CREATE TABLE IF NOT EXISTS meetings (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, hostName TEXT NOT NULL, meetingNo TEXT UNIQUE NOT NULL, password TEXT, status TEXT DEFAULT 'waiting', actualStartTime TEXT, actualEndTime TEXT, maxParticipants INTEGER DEFAULT 100, createdAt TEXT DEFAULT CURRENT_TIMESTAMP)`);
     db.run(`CREATE TABLE IF NOT EXISTS participants (id INTEGER PRIMARY KEY AUTOINCREMENT, meetingId INTEGER NOT NULL, name TEXT NOT NULL, isHost INTEGER DEFAULT 0, joinedAt TEXT DEFAULT CURRENT_TIMESTAMP)`);
     db.run(`CREATE TABLE IF NOT EXISTS chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, meetingId INTEGER NOT NULL, senderName TEXT NOT NULL, content TEXT NOT NULL, createdAt TEXT DEFAULT CURRENT_TIMESTAMP)`);
   }
   saveDb();
+  console.log('Database initialized');
   return db;
 };
 
 const saveDb = () => {
   if (db) {
-    const data = db.export();
-    const buffer = Buffer.from(data);
-    fs.writeFileSync(dbPath, buffer);
+    try {
+      const data = db.export();
+      const buffer = Buffer.from(data);
+      fs.writeFileSync(dbPath, buffer);
+      console.log('Database saved:', dbPath);
+    } catch (err) {
+      console.error('Failed to save database:', err);
+    }
   }
 };
 
@@ -42,11 +55,11 @@ const generateMeetingNo = () => Math.random().toString().substring(2, 12);
 const createMeeting = (title, hostName, password) => {
   const meetingNo = generateMeetingNo();
   const actualStartTime = new Date().toISOString();
+  console.log('Creating meeting:', title, meetingNo);
   
   db.run('INSERT INTO meetings (title, hostName, meetingNo, password, status, actualStartTime, maxParticipants, createdAt) VALUES (?,?,?,?,?,?,?,?)', 
     [title, hostName, meetingNo, password || null, 'waiting', actualStartTime, 100, new Date().toISOString()]);
   
-  // Get the inserted row by meetingNo (simpler and more reliable)
   const result = db.exec(`SELECT id FROM meetings WHERE meetingNo = '${meetingNo}'`);
   let id = 0;
   if (result.length > 0 && result[0].values.length > 0) {
@@ -54,18 +67,22 @@ const createMeeting = (title, hostName, password) => {
   }
   
   saveDb();
+  console.log('Meeting created with id:', id);
   return { id, meetingNo, title, hostName };
 };
 
 const getMeetingByNo = (meetingNo) => {
+  console.log('Looking for meeting:', meetingNo);
   const stmt = db.prepare('SELECT * FROM meetings WHERE meetingNo = ?');
   stmt.bind([meetingNo]);
   if (stmt.step()) {
     const row = stmt.getAsObject();
     stmt.free();
+    console.log('Found meeting:', row);
     return row;
   }
   stmt.free();
+  console.log('Meeting not found');
   return null;
 };
 
