@@ -20,12 +20,6 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-initDb().then(() => {
-  console.log('Database initialized');
-}).catch(err => {
-  console.error('Database init failed:', err);
-});
-
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
@@ -198,6 +192,13 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-httpServer.listen(PORT, () => {
-  console.log(`🚀 CloudMeeting running on http://localhost:${PORT}`);
+// Wait for database init before starting server
+initDb().then(() => {
+  console.log('Database initialized');
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 CloudMeeting running on http://localhost:${PORT}`);
+  });
+}).catch(err => {
+  console.error('Database init failed:', err);
+  process.exit(1);
 });
