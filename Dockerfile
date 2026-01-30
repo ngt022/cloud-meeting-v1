@@ -17,8 +17,7 @@ COPY client/package*.json ./
 COPY client ./
 RUN npm install && npm run build
 
-# 明确复制 dist 到 /app/dist
-RUN cp -r client/dist ./dist
+# vite 输出到 /app/dist，直接使用
 
 WORKDIR /app
 
