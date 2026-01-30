@@ -46,8 +46,8 @@ const createMeeting = (title, hostName, password) => {
   db.run('INSERT INTO meetings (title, hostName, meetingNo, password, status, actualStartTime, maxParticipants, createdAt) VALUES (?,?,?,?,?,?,?,?)', 
     [title, hostName, meetingNo, password || null, 'waiting', actualStartTime, 100, new Date().toISOString()]);
   
-  // Get the last inserted ID
-  const result = db.exec('SELECT id FROM meetings WHERE rowid = last_insert_rowid()');
+  // Get the inserted row by meetingNo (simpler and more reliable)
+  const result = db.exec(`SELECT id FROM meetings WHERE meetingNo = '${meetingNo}'`);
   let id = 0;
   if (result.length > 0 && result[0].values.length > 0) {
     id = result[0].values[0][0];
@@ -92,7 +92,7 @@ const addParticipant = (meetingId, name, isHost) => {
   const joinedAt = new Date().toISOString();
   db.run('INSERT INTO participants (meetingId, name, isHost, joinedAt) VALUES (?,?,?,?)', [meetingId, name, isHost ? 1 : 0, joinedAt]);
   
-  const result = db.exec('SELECT id FROM participants WHERE rowid = last_insert_rowid()');
+  const result = db.exec(`SELECT id FROM participants WHERE meetingId = ${meetingId} AND name = '${name}' ORDER BY id DESC LIMIT 1`);
   let id = 0;
   if (result.length > 0 && result[0].values.length > 0) {
     id = result[0].values[0][0];
@@ -117,7 +117,7 @@ const addChatMessage = (meetingId, senderName, content) => {
   const createdAt = new Date().toISOString();
   db.run('INSERT INTO chat_messages (meetingId, senderName, content, createdAt) VALUES (?,?,?,?)', [meetingId, senderName, content, createdAt]);
   
-  const result = db.exec('SELECT id FROM chat_messages WHERE rowid = last_insert_rowid()');
+  const result = db.exec(`SELECT id FROM chat_messages WHERE meetingId = ${meetingId} ORDER BY id DESC LIMIT 1`);
   let id = 0;
   if (result.length > 0 && result[0].values.length > 0) {
     id = result[0].values[0][0];
