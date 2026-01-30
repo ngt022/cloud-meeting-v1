@@ -23,38 +23,49 @@
       <!-- 语音状态显示 -->
       <div class="audio-area">
         <div class="audio-visual">
-          <div class="wave" :class="{ active: !isMuted && canSpeak }">
+          <div class="wave" :class="{ active: isSpeaking }">
             <span></span><span></span><span></span><span></span><span></span>
           </div>
           <div class="status-text">
-            <span v-if="isMuted" class="muted">静音中</span>
-            <span v-else-if="!canSpeak" class="no-speak">等待主持人允许发言</span>
+            <span v-if="isHost" class="host-status">主持人</span>
+            <span v-else-if="isMuted" class="muted">静音中</span>
+            <span v-else-if="!canSpeak" class="no-speak">等待发言</span>
             <span v-else class="speaking">可以发言</span>
+          </div>
+          <!-- 音频质量指示 -->
+          <div class="audio-quality" :class="qualityClass">
+            <span>通话质量: {{ qualityText }}</span>
           </div>
         </div>
         
         <!-- 参会者列表 -->
         <div class="participants-section">
-          <div class="participant-card" :class="{ 'is-host': isHost, 'is-self': true }">
-            <div class="avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
+          <!-- 自己 -->
+          <div class="participant-card host" :class="{ 'is-self': true }">
+            <div class="avatar host-avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
             <div class="info">
               <span class="name">{{ localName || '我' }} {{ isHost ? '(主持人)' : '' }}</span>
-              <span class="status">{{ isMuted ? '静音' : (canSpeak ? '在线' : '等待发言') }}</span>
+              <span class="status">{{ isMuted ? '静音' : '在线' }}</span>
             </div>
-            <div class="actions" v-if="isHost">
-              <button :class="['btn-action', isMuted && 'active']" @click="toggleMute">
+            <div class="actions">
+              <button v-if="!isHost" :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
                 {{ isMuted ? '取消静音' : '静音' }}
               </button>
+              <button v-if="isHost" class="btn-end" @click="endMeeting">结束会议</button>
             </div>
           </div>
           
+          <!-- 其他参会者 -->
           <div v-for="user in participants" :key="user.socketId" 
-               class="participant-card" 
-               :class="{ 'is-host': user.isHost, 'muted': user.muted }">
+               class="participant-card"
+               :class="{ 'muted': user.muted, 'is-host': user.isHost }">
             <div class="avatar">{{ user.name.charAt(0).toUpperCase() }}</div>
             <div class="info">
               <span class="name">{{ user.name }} {{ user.isHost ? '(主持人)' : '' }}</span>
-              <span class="status">{{ user.muted ? '已静音' : '在线' }}</span>
+              <span class="status">
+                {{ user.muted ? '已静音' : '在线' }}
+                <span v-if="user.speaking" class="speaking-indicator">正在发言</span>
+              </span>
             </div>
             <div class="actions" v-if="isHost && !user.isHost">
               <button :class="['btn-action', user.muted && 'active']" @click="muteParticipant(user)">
@@ -71,17 +82,14 @@
 
     <!-- 控制栏 -->
     <footer class="controls">
-      <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak && !isHost">
+      <button v-if="!isHost" :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
         {{ isMuted ? '取消静音' : '静音' }}
       </button>
       <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
         聊天
       </button>
-      <button v-if="isHost" class="control-btn danger" @click="endMeeting">
-        结束会议
-      </button>
       <button class="control-btn leave" @click="leaveMeeting">
-        {{ isHost ? '离开' : '退出' }}
+        {{ isHost ? '离开会议' : '退出会议' }}
       </button>
     </footer>
 
@@ -122,7 +130,8 @@ const localParticipantId = ref(null)
 const copied = ref(false)
 const isHost = ref(false)
 const locked = ref(false)
-const meetingEnded = ref(false)
+const isSpeaking = ref(false)
+const audioQuality = ref('good') // good, fair, poor
 
 const socket = ref(null)
 const isMuted = ref(true)
@@ -130,8 +139,15 @@ const showChat = ref(false)
 const chatMsg = ref('')
 const duration = ref('00:00')
 const startTime = Date.now()
+const peerConnections = new Map()
 
-const canSpeak = computed(() => !isMuted.value && (isHost.value || !locked.value))
+const canSpeak = computed(() => isHost.value || !locked.value)
+
+const qualityClass = computed(() => `quality-${audioQuality.value}`)
+const qualityText = computed(() => {
+  const map = { good: '良好', fair: '一般', poor: '较差' }
+  return map[audioQuality.value] || '未知'
+})
 
 const copyLink = async () => {
   const link = window.location.origin + '/meeting/' + route.params.no
@@ -162,6 +178,11 @@ const toggleLock = async () => {
     
     if (data.success) {
       locked.value = data.locked
+      messages.value.push({ 
+        name: '系统', 
+        content: locked.value ? '会议已锁定' : '会议已解锁', 
+        isSelf: false 
+      })
     }
   } catch (e) {
     console.error('锁定操作失败:', e)
@@ -169,17 +190,13 @@ const toggleLock = async () => {
 }
 
 const endMeeting = async () => {
-  if (!confirm('确定要结束会议吗？所有参会者将被移出，会议数据将被清除。')) {
-    return
-  }
+  if (!confirm('确定要结束会议吗？所有参会者将被移出。')) return
   
   try {
     await fetch(`/api/meetings/${meeting.value.id}/end`, { method: 'POST' })
     socket.value?.emit('leave-room', { meetingId: route.params.no })
     socket.value?.disconnect()
-    if (window.localAudioStream) {
-      window.localAudioStream.getTracks().forEach(t => t.stop())
-    }
+    stopAudio()
     alert('会议已结束')
     router.push('/')
   } catch (e) {
@@ -203,26 +220,92 @@ const muteParticipant = async (user) => {
 const removeParticipant = async (user) => {
   if (confirm(`确定要将 ${user.name} 移出会议吗？`)) {
     try {
-      await fetch(`/api/meetings/${meeting.value.id}/remove/${user.id}`, {
-        method: 'POST'
-      })
+      await fetch(`/api/meetings/${meeting.value.id}/remove/${user.id}`, { method: 'POST' })
     } catch (e) {
       console.error('移出操作失败:', e)
     }
   }
 }
 
-const initAudio = async () => {
+const startAudio = async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    // 优化的音频配置
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,      // 回声消除
+        noiseSuppression: true,       // 噪声抑制
+        autoGainControl: true,        // 自动增益控制
+        latency: 0,                   // 低延迟
+        channelCount: 1,              // 单声道足够
+        sampleRate: 48000             // 高采样率
+      }
+    })
+    
     window.localAudioStream = stream
+    monitorAudioQuality(stream)
   } catch (e) {
     console.warn('无法访问麦克风:', e)
+    // 降级尝试
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      window.localAudioStream = stream
+    } catch (e2) {
+      console.error('无法访问麦克风:', e2)
+    }
+  }
+}
+
+const monitorAudioQuality = (stream) => {
+  const context = new (window.AudioContext || window.webkitAudioContext)()
+  const source = context.createMediaStreamSource(stream)
+  const analyser = context.createAnalyser()
+  analyser.fftSize = 256
+  source.connect(analyser)
+  
+  const dataArray = new Uint8Array(analyser.frequencyBinCount)
+  
+  const check = () => {
+    if (!window.localAudioStream) {
+      context.close()
+      return
+    }
+    
+    analyser.getByteFrequencyData(dataArray)
+    const average = dataArray.reduce((a, b) => a + b) / dataArray.length
+    
+    // 检测是否在说话
+    isSpeaking.value = average > 20 && !isMuted.value
+    
+    // 根据音量调整音频质量指示
+    if (average > 50) {
+      audioQuality.value = 'good'
+    } else if (average > 20) {
+      audioQuality.value = 'good'
+    } else {
+      audioQuality.value = 'fair'
+    }
+    
+    requestAnimationFrame(check)
+  }
+  
+  context.resume()
+  check()
+}
+
+const stopAudio = () => {
+  if (window.localAudioStream) {
+    window.localAudioStream.getTracks().forEach(t => t.stop())
+    window.localAudioStream = null
   }
 }
 
 const connectSocket = () => {
-  socket.value = io()
+  socket.value = io({
+    transports: ['websocket', 'polling'],  // 优先 websocket
+    reconnection: true,
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000
+  })
   
   socket.value.on('connect', () => {
     socket.value.emit('join-room', {
@@ -267,6 +350,7 @@ const connectSocket = () => {
   socket.value.on('participant-removed', ({ participantId }) => {
     if (participantId === localParticipantId.value) {
       alert('您已被移出会议')
+      stopAudio()
       socket.value?.disconnect()
       router.push('/')
     } else {
@@ -280,21 +364,18 @@ const connectSocket = () => {
 
   socket.value.on('meeting-locked', () => {
     locked.value = true
-    messages.value.push({ name: '系统', content: '会议已锁定，新参会者需要等待主持人允许才能发言', isSelf: false })
+    messages.value.push({ name: '系统', content: '会议已锁定，请等待主持人允许发言', isSelf: false })
   })
 
   socket.value.on('meeting-unlocked', () => {
     locked.value = false
-    messages.value.push({ name: '系统', content: '会议已解锁，所有参会者可以发言', isSelf: false })
+    messages.value.push({ name: '系统', content: '会议已解锁，可以发言', isSelf: false })
   })
 
   socket.value.on('meeting-ended', () => {
-    meetingEnded.value = true
     alert('会议已结束')
+    stopAudio()
     socket.value?.disconnect()
-    if (window.localAudioStream) {
-      window.localAudioStream.getTracks().forEach(t => t.stop())
-    }
     router.push('/')
   })
 
@@ -303,6 +384,10 @@ const connectSocket = () => {
     nextTick(() => {
       if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
     })
+  })
+
+  socket.value.on('disconnect', () => {
+    console.log('Socket disconnected')
   })
 }
 
@@ -315,13 +400,16 @@ const fetchMeeting = async () => {
       meeting.value = data.data.meeting
       const myName = route.query.name || localStorage.getItem('userName') || ''
       isHost.value = data.data.meeting.hostName === myName
-      if (!isHost.value) {
-        isMuted.value = true
+      
+      // 主持人始终可以发言
+      if (isHost.value) {
+        isMuted.value = false
       }
+      
       localParticipantId.value = Date.now()
       messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
     } else {
-      alert('会议不存在或已结束')
+      alert(data.message || '会议不存在')
       router.push('/')
     }
   } catch (e) {
@@ -330,7 +418,17 @@ const fetchMeeting = async () => {
 }
 
 const toggleMute = () => {
-  if (!isHost.value && locked.value) {
+  // 主持人始终可以说话
+  if (isHost.value) {
+    isMuted.value = !isMuted.value
+    if (window.localAudioStream) {
+      window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
+    }
+    return
+  }
+  
+  // 非主持人需要等待允许
+  if (locked.value) {
     alert('请等待主持人允许发言')
     return
   }
@@ -352,9 +450,7 @@ const sendMessage = async () => {
 const leaveMeeting = () => {
   socket.value?.emit('leave-room', { meetingId: route.params.no })
   socket.value?.disconnect()
-  if (window.localAudioStream) {
-    window.localAudioStream.getTracks().forEach(t => t.stop())
-  }
+  stopAudio()
   router.push('/')
 }
 
@@ -369,17 +465,16 @@ const updateDuration = () => {
 onMounted(async () => {
   localName.value = route.query.name || localStorage.getItem('userName') || ''
   await fetchMeeting()
-  await initAudio()
+  await startAudio()
   connectSocket()
   timer = setInterval(updateDuration, 1000)
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
+  stopAudio()
+  peerConnections.forEach(pc => pc.close())
   socket.value?.disconnect()
-  if (window.localAudioStream) {
-    window.localAudioStream.getTracks().forEach(t => t.stop())
-  }
 })
 </script>
 
@@ -466,8 +561,8 @@ onUnmounted(() => {
 }
 
 .wave.active span {
-  background: #fff;
-  animation: wave 1s ease-in-out infinite;
+  background: #4caf50;
+  animation: wave 0.5s ease-in-out infinite;
 }
 
 .wave span:nth-child(1) { animation-delay: 0s; }
@@ -481,10 +576,26 @@ onUnmounted(() => {
   50% { height: 60px; }
 }
 
-.status-text { color: #888; font-size: 14px; letter-spacing: 2px; }
+.status-text { 
+  color: #888; 
+  font-size: 14px; 
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+
 .status-text .muted { color: #ff4d4f; }
 .status-text .no-speak { color: #ff9800; }
 .status-text .speaking { color: #4caf50; }
+.status-text .host-status { color: #ffd700; }
+
+.audio-quality {
+  font-size: 12px;
+  color: #666;
+}
+
+.audio-quality.quality-good { color: #4caf50; }
+.audio-quality.quality-fair { color: #ff9800; }
+.audio-quality.quality-poor { color: #ff4d4f; }
 
 .participants-section {
   width: 100%;
@@ -506,9 +617,11 @@ onUnmounted(() => {
 }
 
 .participant-card:hover { border-color: #333; }
-.participant-card.muted { opacity: 0.6; }
-.participant-card.is-host { border-color: #444; background: #1a1a1a; }
-.participant-card.is-self { border-color: #444; }
+.participant-card.muted { opacity: 0.5; }
+.participant-card.is-host { 
+  border-color: #ffd700; 
+  background: linear-gradient(135deg, #1a1a1a 0%, #141414 100%);
+}
 
 .avatar {
   width: 48px;
@@ -523,15 +636,23 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-.is-host .avatar { background: #333; }
+.host-avatar {
+  background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
+  color: #000;
+}
 
 .info { flex: 1; }
 .info .name { display: block; color: #fff; font-size: 16px; margin-bottom: 4px; }
-.info .status { color: #666; font-size: 12px; }
+.info .status { color: #666; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+
+.speaking-indicator {
+  color: #4caf50;
+  font-size: 11px;
+}
 
 .actions { display: flex; gap: 8px; }
 
-.btn-action, .btn-remove {
+.btn-action, .btn-remove, .btn-end {
   padding: 8px 16px;
   font-size: 12px;
   border-radius: 2px;
@@ -548,6 +669,7 @@ onUnmounted(() => {
 
 .btn-action:hover { background: #333; }
 .btn-action.active { background: #fff; color: #000; border-color: #fff; }
+.btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn-remove {
   background: transparent;
@@ -556,6 +678,14 @@ onUnmounted(() => {
 }
 
 .btn-remove:hover { background: #ff4d4f; color: #fff; }
+
+.btn-end {
+  background: #ff4d4f;
+  color: #fff;
+  border: none;
+}
+
+.btn-end:hover { background: #ff6b6b; }
 
 .controls {
   display: flex;
@@ -567,7 +697,7 @@ onUnmounted(() => {
 }
 
 .control-btn {
-  min-width: 120px;
+  min-width: 140px;
   padding: 16px 24px;
   border-radius: 4px;
   border: none;
@@ -582,8 +712,6 @@ onUnmounted(() => {
 .control-btn:hover { background: #333; }
 .control-btn.active { background: #fff; color: #000; }
 .control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.control-btn.danger { background: #ff4d4f; }
-.control-btn.danger:hover { background: #ff6b6b; }
 .control-btn.leave { background: #444; }
 .control-btn.leave:hover { background: #555; }
 
@@ -664,7 +792,7 @@ onUnmounted(() => {
   .meeting-content.with-chat { margin-right: 0; }
   .chat-panel { width: 100%; }
   .header-actions .btn-copy, .header-actions .btn-lock { display: none; }
-  .controls { gap: 16px; }
-  .control-btn { min-width: 80px; padding: 14px 16px; font-size: 12px; }
+  .controls { gap: 16px; flex-wrap: wrap; }
+  .control-btn { min-width: 100px; padding: 14px 16px; font-size: 12px; }
 }
 </style>
