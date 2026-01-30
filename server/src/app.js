@@ -20,20 +20,17 @@ const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
-// 初始化数据库
 initDb().then(() => {
   console.log('Database initialized');
 }).catch(err => {
   console.error('Database init failed:', err);
 });
 
-// 中间件
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
 
-// API 路由
 app.post('/api/meetings', (req, res) => {
   try {
     const { title, hostName, password } = req.body;
@@ -48,8 +45,8 @@ app.post('/api/meetings', (req, res) => {
       success: true,
       data: {
         meetingId: meeting.id,
- meeting.meetingNo,
-        title:        meetingNo: meeting.title,
+        meetingNo: meeting.meetingNo,
+        title: meeting.title,
         hostName: meeting.hostName
       }
     });
@@ -126,7 +123,6 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Socket.IO 信令
 const rooms = new Map();
 
 io.on('connection', (socket) => {
@@ -196,7 +192,6 @@ io.on('connection', (socket) => {
   });
 });
 
-// 前端路由 (SPA)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../../dist/index.html'));
 });
