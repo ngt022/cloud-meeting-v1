@@ -9,20 +9,15 @@ let SQL = null;
 
 const initDb = async () => {
   if (db) return db;
-  console.log('Initializing database...');
   SQL = await initSqlJs();
   
   if (fs.existsSync(dbPath)) {
-    console.log('Loading existing database from:', dbPath);
     const buffer = fs.readFileSync(dbPath);
     db = new SQL.Database(buffer);
   } else {
-    console.log('Creating new database at:', dbPath);
     db = new SQL.Database();
   }
   
-  // Always ensure tables exist
-  console.log('Ensuring tables exist...');
   db.run(`CREATE TABLE IF NOT EXISTS meetings (
     id INTEGER PRIMARY KEY AUTOINCREMENT, 
     title TEXT NOT NULL, 
@@ -53,12 +48,6 @@ const initDb = async () => {
   )`);
   
   saveDb();
-  
-  // Check row counts
-  const counts = db.exec('SELECT COUNT(*) as c FROM meetings');
-  console.log('Meetings count:', counts.length > 0 ? counts[0].values[0][0] : 0);
-  
-  console.log('Database initialized');
   return db;
 };
 
@@ -85,6 +74,36 @@ const createMeeting = (title, hostName, password) => {
   
   saveDb();
   return { id: Date.now(), meetingNo, title, hostName };
+};
+
+const deleteMeeting = (id) => {
+  try {
+    db.run('DELETE FROM meetings WHERE id = ?', [id]);
+    saveDb();
+    console.log(`Deleted meeting ${id}`);
+  } catch (e) {
+    console.error('Failed to delete meeting:', e);
+  }
+};
+
+const deleteParticipants = (meetingId) => {
+  try {
+    db.run('DELETE FROM participants WHERE meetingId = ?', [meetingId]);
+    saveDb();
+    console.log(`Deleted participants for meeting ${meetingId}`);
+  } catch (e) {
+    console.error('Failed to delete participants:', e);
+  }
+};
+
+const deleteChatMessages = (meetingId) => {
+  try {
+    db.run('DELETE FROM chat_messages WHERE meetingId = ?', [meetingId]);
+    saveDb();
+    console.log(`Deleted chat messages for meeting ${meetingId}`);
+  } catch (e) {
+    console.error('Failed to delete chat messages:', e);
+  }
 };
 
 const getMeetingByNo = (meetingNo) => {
@@ -154,4 +173,4 @@ const getChatMessages = (meetingId) => {
   return results;
 };
 
-module.exports = { initDb, createMeeting, getMeetingByNo, getMeetingById, updateMeetingStatus, addParticipant, getParticipants, addChatMessage, getChatMessages };
+module.exports = { initDb, createMeeting, getMeetingByNo, getMeetingById, updateMeetingStatus, addParticipant, getParticipants, addChatMessage, getChatMessages, deleteMeeting, deleteParticipants, deleteChatMessages };
