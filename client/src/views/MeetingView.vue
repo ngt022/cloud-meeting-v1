@@ -4,11 +4,14 @@
     <header class="header">
       <div class="meeting-info">
         <span class="title">{{ meeting?.title }}</span>
-        <span class="meeting-no">会议号: {{ meeting?.meetingNo }}</span>
+        <span class="meeting-no">{{ meeting?.meetingNo }}</span>
       </div>
       <div class="header-actions">
         <button class="btn-copy" @click="copyLink" :class="{ copied }">
           {{ copied ? '已复制' : '复制链接' }}
+        </button>
+        <button class="btn-lock" @click="toggleLock" :class="{ locked }">
+          {{ locked ? '已锁定' : '锁定会议' }}
         </button>
         <span class="time">{{ duration }}</span>
         <span class="users">{{ participants.length + 1 }}人</span>
@@ -21,13 +24,43 @@
       <div class="main-video">
         <video ref="localVideo" autoplay muted playsinline></video>
         <div class="video-label">
-          <span>{{ localName || '我' }}</span>
+          <span>{{ localName || '我' }} {{ isHost ? '(主持人)' : '' }}</span>
           <span v-if="isMuted" class="muted-status">静音</span>
         </div>
       </div>
 
-      <!-- 小窗口 -->
-      <div class="participants">
+      <!-- 参会者列表（主持人模式） -->
+      <div class="participants-section" v-if="isHost">
+        <div class="participants-header">
+          <span>参会者 ({{ participants.length + 1 }})</span>
+        </div>
+        <div class="participants-list">
+          <!-- 自己 -->
+          <div class="participant-item">
+            <span class="participant-name">{{ localName || '我' }} (主持人)</span>
+            <div class="participant-actions">
+              <button :class="['btn-mute', isMuted && 'muted']" @click="toggleMute">
+                {{ isMuted ? '取消静音' : '静音' }}
+              </button>
+            </div>
+          </div>
+          <!-- 其他参会者 -->
+          <div v-for="user in participants" :key="user.socketId" class="participant-item">
+            <span class="participant-name">{{ user.name }}</span>
+            <div class="participant-actions">
+              <button :class="['btn-mute', user.muted && 'muted']" @click="muteParticipant(user)">
+                {{ user.muted ? '取消静音' : '静音' }}
+              </button>
+              <button class="btn-remove" @click="removeParticipant(user)">
+                移出
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 小窗口（非主持人模式） -->
+      <div class="participants" v-else>
         <div 
           v-for="user in otherParticipants" 
           :key="user.socketId"
@@ -96,7 +129,10 @@ const localVideo = ref(null)
 const videoRefs = ref({})
 const chatContainer = ref(null)
 const localName = ref('')
+const localParticipantId = ref(null)
 const copied = ref(false)
+const isHost = ref(false)
+const locked = ref(false)
 
 const socket = ref(null)
 const isMuted = ref(false)
@@ -116,7 +152,6 @@ const copyLink = async () => {
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
   } catch (e) {
-    // Fallback
     const textArea = document.createElement('textarea')
     textArea.value = link
     document.body.appendChild(textArea)
@@ -125,6 +160,48 @@ const copyLink = async () => {
     document.body.removeChild(textArea)
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
+  }
+}
+
+const toggleLock = async () => {
+  try {
+    const url = locked.value 
+      ? `/api/meetings/${meeting.value.id}/unlock`
+      : `/api/meetings/${meeting.value.id}/lock`
+    
+    const res = await fetch(url, { method: 'POST' })
+    const data = await res.json()
+    
+    if (data.success) {
+      locked.value = data.locked
+    }
+  } catch (e) {
+    console.error('锁定操作失败:', e)
+  }
+}
+
+const muteParticipant = async (user) => {
+  const mute = !user.muted
+  try {
+    await fetch(`/api/meetings/${meeting.value.id}/mute/${user.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mute })
+    })
+  } catch (e) {
+    console.error('静音操作失败:', e)
+  }
+}
+
+const removeParticipant = async (user) => {
+  if (confirm(`确定要将 ${user.name} 移出会议吗？`)) {
+    try {
+      await fetch(`/api/meetings/${meeting.value.id}/remove/${user.id}`, {
+        method: 'POST'
+      })
+    } catch (e) {
+      console.error('移出操作失败:', e)
+    }
   }
 }
 
@@ -147,7 +224,7 @@ const connectSocket = () => {
   socket.value.on('connect', () => {
     socket.value.emit('join-room', {
       meetingId: route.params.no,
-      participantId: Date.now(),
+      participantId: localParticipantId.value,
       participantName: localName.value || '匿名'
     })
   })
@@ -161,12 +238,48 @@ const connectSocket = () => {
     messages.value.push({ name: '系统', content: `${user.participantName} 加入了会议`, isSelf: false })
   })
 
-  socket.value.on('user-left', ({ socketId }) => {
-    const user = participants.value.find(p => p.socketId === socketId)
+  socket.value.on('user-left', ({ socketId, participantId }) => {
+    const user = participants.value.find(p => p.socketId === socketId || p.id === participantId)
     if (user) {
       messages.value.push({ name: '系统', content: `${user.name} 离开了会议`, isSelf: false })
     }
-    participants.value = participants.value.filter(p => p.socketId !== socketId)
+    participants.value = participants.value.filter(p => p.socketId !== socketId && p.id !== participantId)
+  })
+
+  socket.value.on('participant-muted', ({ participantId, muted }) => {
+    const user = participants.value.find(p => p.id === participantId)
+    if (user) {
+      user.muted = muted
+      // 如果是自己被静音
+      if (participantId === localParticipantId.value && localVideo.value?.srcObject) {
+        isMuted.value = muted
+        localVideo.value.srcObject.getAudioTracks().forEach(t => t.enabled = !muted)
+      }
+    }
+  })
+
+  socket.value.on('participant-removed', ({ participantId }) => {
+    if (participantId === localParticipantId.value) {
+      alert('您已被移出会议')
+      socket.value?.disconnect()
+      router.push('/')
+    } else {
+      const user = participants.value.find(p => p.id === participantId)
+      if (user) {
+        messages.value.push({ name: '系统', content: `${user.name} 已被移出会议`, isSelf: false })
+      }
+      participants.value = participants.value.filter(p => p.id !== participantId)
+    }
+  })
+
+  socket.value.on('meeting-locked', () => {
+    locked.value = true
+    messages.value.push({ name: '系统', content: '会议已锁定，新参会者无法加入', isSelf: false })
+  })
+
+  socket.value.on('meeting-unlocked', () => {
+    locked.value = false
+    messages.value.push({ name: '系统', content: '会议已解锁', isSelf: false })
   })
 
   socket.value.on('offer', async ({ offer, from }) => {
@@ -228,6 +341,12 @@ const fetchMeeting = async () => {
     const data = await res.json()
     if (data.success) {
       meeting.value = data.data.meeting
+      
+      // 检查是否是主持人
+      const myName = route.query.name || localStorage.getItem('userName') || ''
+      isHost.value = data.data.meeting.hostName === myName
+      localParticipantId.value = Date.now()
+      
       messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
     } else {
       alert('会议不存在')
@@ -333,9 +452,9 @@ onUnmounted(() => {
 .meeting-info .title { color: #fff; font-size: 16px; font-weight: 500; }
 .meeting-info .meeting-no { color: #666; font-size: 14px; font-family: monospace; }
 
-.header-actions { display: flex; align-items: center; gap: 24px; }
+.header-actions { display: flex; align-items: center; gap: 16px; }
 
-.btn-copy {
+.btn-copy, .btn-lock {
   padding: 8px 16px;
   background: #222;
   color: #fff;
@@ -347,8 +466,9 @@ onUnmounted(() => {
   transition: all 0.2s;
 }
 
-.btn-copy:hover { background: #333; }
+.btn-copy:hover, .btn-lock:hover { background: #333; }
 .btn-copy.copied { background: #fff; color: #000; border-color: #fff; }
+.btn-lock.locked { background: #ff4d4f; border-color: #ff4d4f; }
 
 .time, .users { color: #888; font-size: 14px; }
 
@@ -386,6 +506,62 @@ onUnmounted(() => {
   align-items: center;
 }
 .muted-status { color: #ff4d4f; font-size: 12px; }
+
+.participants-section {
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 4px;
+  padding: 16px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.participants-header {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 12px;
+  letter-spacing: 1px;
+}
+
+.participants-list { display: flex; flex-direction: column; gap: 8px; }
+
+.participant-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #0a0a0a;
+  border-radius: 2px;
+}
+
+.participant-name { color: #fff; font-size: 14px; }
+
+.participant-actions { display: flex; gap: 8px; }
+
+.btn-mute, .btn-remove {
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-mute {
+  background: #222;
+  color: #fff;
+  border: 1px solid #333;
+}
+
+.btn-mute:hover { background: #333; }
+.btn-mute.muted { background: #fff; color: #000; border-color: #fff; }
+
+.btn-remove {
+  background: transparent;
+  color: #ff4d4f;
+  border: 1px solid #ff4d4f;
+}
+
+.btn-remove:hover { background: #ff4d4f; color: #fff; }
 
 .participants { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 4px; }
 .participant { width: 140px; height: 90px; flex-shrink: 0; cursor: pointer; }
@@ -498,6 +674,6 @@ onUnmounted(() => {
   .chat-panel { width: 100%; }
   .participants { display: none; }
   .control-btn { width: 56px; height: 56px; font-size: 11px; }
-  .header-actions .btn-copy { display: none; }
+  .header-actions .btn-copy, .header-actions .btn-lock { display: none; }
 }
 </style>
