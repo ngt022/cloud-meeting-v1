@@ -25,36 +25,64 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../dist')));
 
-// Debug endpoint
-app.get('/api/debug', (req, res) => {
-  const { db } = require('./models');
-  res.json({ 
-    message: 'Server is running',
-    dbExists: !!db,
-    dbType: db ? db.constructor.name : null
-  });
+// 会议控制 - 静音/取消静音参会者
+app.post('/api/meetings/:id/mute/:participantId', (req, res) => {
+  try {
+    const { id, participantId } = req.params;
+    const { mute } = req.body;
+    
+    io.to(`room:${id}`).emit('participant-muted', { 
+      participantId: parseInt(participantId), 
+      muted: mute 
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('静音操作失败:', error);
+    res.status(500).json({ success: false, message: '操作失败' });
+  }
 });
 
-// Test endpoint to create and query a meeting
-app.get('/api/test', (req, res) => {
-  const testNo = 'TEST12345678';
-  
-  // Try to get existing
-  let meeting = getMeetingByNo(testNo);
-  
-  if (!meeting) {
-    console.log('Creating test meeting...');
-    const result = createMeeting('Test Meeting', 'Test Host', null);
-    console.log('Created:', result);
-    meeting = getMeetingByNo(testNo);
-    console.log('Found after create:', meeting);
+// 会议控制 - 移出参会者
+app.post('/api/meetings/:id/remove/:participantId', (req, res) => {
+  try {
+    const { id, participantId } = req.params;
+    
+    io.to(`room:${id}`).emit('participant-removed', { 
+      participantId: parseInt(participantId) 
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('移出操作失败:', error);
+    res.status(500).json({ success: false, message: '操作失败' });
   }
-  
-  res.json({ 
-    success: true, 
-    meeting,
-    testNo 
-  });
+});
+
+// 会议控制 - 锁定会议
+app.post('/api/meetings/:id/lock', (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    io.to(`room:${id}`).emit('meeting-locked');
+    res.json({ success: true, locked: true });
+  } catch (error) {
+    console.error('锁定会议失败:', error);
+    res.status(500).json({ success: false, message: '操作失败' });
+  }
+});
+
+// 会议控制 - 解锁会议
+app.post('/api/meetings/:id/unlock', (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    io.to(`room:${id}`).emit('meeting-unlocked');
+    res.json({ success: true, locked: false });
+  } catch (error) {
+    console.error('解锁会议失败:', error);
+    res.status(500).json({ success: false, message: '操作失败' });
+  }
 });
 
 app.post('/api/meetings', (req, res) => {
@@ -65,12 +93,6 @@ app.post('/api/meetings', (req, res) => {
     }
 
     const meeting = createMeeting(title, hostName, password || null);
-    console.log('Created meeting:', meeting);
-    
-    // Verify it was saved
-    const saved = getMeetingByNo(meeting.meetingNo);
-    console.log('Saved meeting:', saved);
-
     addParticipant(meeting.id, hostName, true);
 
     res.json({
@@ -84,14 +106,13 @@ app.post('/api/meetings', (req, res) => {
     });
   } catch (error) {
     console.error('创建会议失败:', error);
-    res.status(500).json({ success: false, message: '创建会议失败: ' + error.message });
+    res.status(500).json({ success: false, message: '创建会议失败' });
   }
 });
 
 app.get('/api/meetings/:meetingNo', (req, res) => {
   try {
     const meeting = getMeetingByNo(req.params.meetingNo);
-    console.log('Get meeting:', req.params.meetingNo, meeting);
 
     if (!meeting) {
       return res.status(404).json({ success: false, message: '会议不存在' });
@@ -163,7 +184,7 @@ io.on('connection', (socket) => {
     socket.join(`room:${meetingId}`);
     
     const room = rooms.get(meetingId) || new Map();
-    room.set(socket.id, { id: participantId, name: participantName });
+    room.set(socket.id, { id: participantId, name: participantName, muted: false });
     rooms.set(meetingId, room);
 
     socket.to(`room:${meetingId}`).emit('user-joined', {
@@ -215,8 +236,9 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     rooms.forEach((room, meetingId) => {
       if (room.has(socket.id)) {
+        const user = room.get(socket.id);
         room.delete(socket.id);
-        io.to(`room:${meetingId}`).emit('user-left', { socketId: socket.id });
+        io.to(`room:${meetingId}`).emit('user-left', { socketId: socket.id, participantId: user?.id });
         if (room.size === 0) {
           rooms.delete(meetingId);
         }
@@ -234,7 +256,7 @@ const PORT = process.env.PORT || 3000;
 initDb().then(() => {
   console.log('Database initialized');
   httpServer.listen(PORT, () => {
-    console.log(`🚀 CloudMeeting running on http://localhost:${PORT}`);
+    console.log(`CloudMeeting running on http://localhost:${PORT}`);
   });
 }).catch(err => {
   console.error('Database init failed:', err);
