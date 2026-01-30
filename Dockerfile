@@ -2,7 +2,7 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# 1. 先处理服务端
+# 1. 服务端
 WORKDIR /app/server
 COPY server/package*.json ./
 RUN npm install
@@ -10,20 +10,19 @@ RUN npm install
 COPY server/src ./src
 COPY server/data ./data
 
-# 2. 再处理客户端（不覆盖服务端）
-WORKDIR /app
-COPY client/package*.json ./client/
-COPY client/vite.config.js ./client/
-COPY client/index.html ./client/
-COPY client/src ./client/src
-
+# 2. 客户端（单独目录）
 WORKDIR /app/client
-RUN npm install && npm run build
+COPY client/package*.json ./
+COPY client/vite.config.js ./
+COPY client/index.html ./
+COPY client/src ./src
 
-# 3. 复制客户端构建产物到 /app/dist
-RUN mkdir -p /app/dist && cp -r /app/client/dist/* /app/dist/
+RUN npm install
 
-# 4. 返回 /app 启动
+# 构建到 /app/dist
+RUN npm run build
+
+# 3. 清理客户端不需要的文件
 WORKDIR /app
 
 EXPOSE 3000
