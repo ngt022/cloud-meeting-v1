@@ -28,11 +28,12 @@
           v-model="password" 
           type="password"
           placeholder="请输入会议密码"
+          @keyup.enter="joinMeeting"
         />
       </div>
 
       <button class="btn-primary" @click="checkMeeting" :disabled="!canCheck">
-        下一步
+        {{ needsPassword ? '加入会议' : '下一步' }}
       </button>
       
       <button class="btn-back" @click="$router.push('/')">
@@ -76,6 +77,7 @@ const checkMeeting = async () => {
       meetingId.value = data.data.meeting.id
       needsPassword.value = !!data.data.meeting.password
       
+      // 无密码直接加入，有密码显示密码输入框
       if (!needsPassword.value) {
         joinMeeting()
       }
@@ -94,19 +96,18 @@ const joinMeeting = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         name: name.value,
-        password: password.value || undefined
+        password: needsPassword.value ? password.value : undefined
       })
     })
     const data = await res.json()
     
     if (data.success) {
+      // 保存用户名到 localStorage
+      localStorage.setItem('userName', name.value)
+      
       router.push({
-        path: '/meeting',
-        query: { 
-          no: meetingNo.value,
-          id: meetingId.value,
-          name: name.value
-        }
+        path: `/meeting/${meetingNo.value}`,
+        query: { name: name.value }
       })
     } else {
       alert(data.message || '加入失败')
