@@ -13,6 +13,9 @@
       <button class="btn-secondary large" @click="showJoinModal = true">
         加入会议
       </button>
+      <button class="btn-test large" @click="joinTestMeeting">
+        🚀 测试会议室
+      </button>
     </div>
 
     <!-- 会议历史 -->
@@ -154,6 +157,28 @@ const formatTime = (timestamp) => {
 
 const quickJoin = async (item) => {
   router.push(`/meeting/${item.meetingNo}`)
+}
+
+const joinTestMeeting = async () => {
+  const testMeetingNo = '8888888888'
+  const name = localStorage.getItem('userName') || '测试用户'
+  
+  // 先检查会议是否存在
+  try {
+    const res = await fetch(`/api/meetings/${testMeetingNo}`)
+    const data = await res.json()
+    
+    if (data.success) {
+      router.push({
+        path: '/meeting',
+        query: { no: testMeetingNo, name }
+      })
+    } else {
+      alert('测试会议室不存在')
+    }
+  } catch (e) {
+    alert('连接失败，请稍后重试')
+  }
 }
 
 const createMeeting = async () => {
@@ -495,6 +520,23 @@ button.large {
 .btn-secondary:hover {
   background: #fff;
   color: #000;
+}
+
+.btn-test {
+  padding: 14px 40px;
+  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  color: #fff;
+  border: none;
+  border-radius: 2px;
+  font-size: 14px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-test:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
 }
 
 .btn-close {
