@@ -2,6 +2,7 @@
   <div class="join">
     <div class="container">
       <h1>加入会议</h1>
+      <p class="version">v1.0.2</p>
       
       <div class="form-group">
         <label>会议号</label>
@@ -173,6 +174,13 @@ h1 {
 
 .form-group input::placeholder {
   color: #444;
+}
+
+.version {
+  text-align: center;
+  color: #444;
+  font-size: 12px;
+  margin-bottom: 24px;
 }
 
 .btn-primary {

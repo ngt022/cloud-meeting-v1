@@ -256,6 +256,23 @@ io.on('connection', (socket) => {
     });
   });
 
+  // 客户端主动发送静音状态变化
+  socket.on('participant-muted', ({ meetingId, participantId, muted }) => {
+    updateActivity(meetingId);
+    const room = rooms.get(meetingId);
+    if (room) {
+      const user = room.get(socket.id);
+      if (user) {
+        user.muted = muted;
+        // 广播给房间内所有人，包括发送者（用于更新UI）
+        io.to(`room:${meetingId}`).emit('participant-muted', {
+          participantId,
+          muted
+        });
+      }
+    }
+  });
+
   socket.on('leave-room', ({ meetingId }) => {
     updateActivity(meetingId);
     socket.leave(`room:${meetingId}`);

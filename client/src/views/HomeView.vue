@@ -3,6 +3,7 @@
     <div class="header">
       <h1>CloudMeeting</h1>
       <p>极简视频会议 - 无需注册，开箱即用</p>
+      <p class="version">v1.0.2</p>
     </div>
 
     <div class="actions">
@@ -273,6 +274,12 @@ const joinMeeting = async () => {
   font-size: 14px;
   color: #666;
   letter-spacing: 2px;
+}
+
+.header .version {
+  font-size: 12px;
+  color: #444;
+  margin-top: 12px;
 }
 
 .actions {
