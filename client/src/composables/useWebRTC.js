@@ -116,13 +116,14 @@ export function useWebRTC() {
 
   // 处理收到的 offer
   const handleOffer = async ({ fromSocketId, offer }) => {
-    console.log('[WebRTC] 收到 offer:', fromSocketId)
+    console.log('[WebRTC] 处理 offer from:', fromSocketId)
     const pc = createPeerConnection(fromSocketId)
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
+      console.log('[WebRTC] 远程描述设置成功')
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      console.log('[WebRTC] 发送 answer:', fromSocketId)
+      console.log('[WebRTC] 发送 answer to:', fromSocketId)
       socket.value.emit('webrtc-answer', {
         meetingId: meetingId.value,
         targetSocketId: fromSocketId,
@@ -135,12 +136,12 @@ export function useWebRTC() {
 
   // 处理收到的 answer
   const handleAnswer = async ({ fromSocketId, answer }) => {
-    console.log('[WebRTC] 收到 answer:', fromSocketId)
+    console.log('[WebRTC] 处理 answer from:', fromSocketId)
     const pc = peerConnections.value.get(fromSocketId)
     if (pc) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
-        console.log('[WebRTC] 设置远程描述成功:', fromSocketId)
+        console.log('[WebRTC] Answer 远程描述设置成功')
       } catch (e) {
         console.error('[WebRTC] 处理 answer 失败:', e)
       }
@@ -151,11 +152,12 @@ export function useWebRTC() {
 
   // 处理收到的 ICE candidate
   const handleIceCandidate = async ({ fromSocketId, candidate }) => {
-    console.log('[WebRTC] 收到 ICE candidate:', fromSocketId)
+    console.log('[WebRTC] 处理 ICE candidate from:', fromSocketId)
     const pc = peerConnections.value.get(fromSocketId)
     if (pc) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
+        console.log('[WebRTC] ICE candidate 添加成功')
       } catch (e) {
         console.error('[WebRTC] 添加 ICE candidate 失败:', e)
       }

@@ -394,29 +394,26 @@ const connectSocket = () => {
 
   // WebRTC 信令处理 - 只有在已加入房间后才处理
   socket.value.on('webrtc-offer', async (data) => {
+    console.log('[Socket] 收到 webrtc-offer from:', data.fromSocketId)
     if (!isJoined.value) {
-      console.log('[WebRTC] 忽略未加入时的offer')
-      return
+      console.log('[WebRTC] 未加入但处理offer')
     }
-    console.log('[Socket] 收到 webrtc-offer')
     await webrtc.handleOffer(data)
   })
 
   socket.value.on('webrtc-answer', async (data) => {
+    console.log('[Socket] 收到 webrtc-answer from:', data.fromSocketId)
     if (!isJoined.value) {
-      console.log('[WebRTC] 忽略未加入时的answer')
-      return
+      console.log('[WebRTC] 未加入但处理answer')
     }
-    console.log('[Socket] 收到 webrtc-answer')
     await webrtc.handleAnswer(data)
   })
 
   socket.value.on('webrtc-ice-candidate', async (data) => {
+    console.log('[Socket] 收到 webrtc-ice-candidate from:', data.fromSocketId)
     if (!isJoined.value) {
-      console.log('[WebRTC] 忽略未加入时的ice-candidate')
-      return
+      console.log('[WebRTC] 未加入但处理ice-candidate')
     }
-    console.log('[Socket] 收到 webrtc-ice-candidate')
     await webrtc.handleIceCandidate(data)
   })
 
