@@ -169,10 +169,11 @@ const joinTestMeeting = async () => {
     const data = await res.json()
     
     if (data.success) {
-      // 会议存在，直接加入
+      // 会议存在，加入时使用"主持人"身份
+      localStorage.setItem('userName', '主持人')
       router.push({
         path: '/meeting',
-        query: { no: testMeetingNo, name }
+        query: { no: testMeetingNo, name: '主持人' }
       })
     } else {
       // 会议不存在，创建新的测试会议室

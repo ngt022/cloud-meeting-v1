@@ -340,6 +340,24 @@ initDb().then(async () => {
     console.log(`默认测试会议室已存在，会议号: ${defaultMeetingNo}`)
   }
   
+  // 清理定时任务，不自动清理测试会议室
+  const originalInterval = setInterval(() => {
+    const now = Date.now();
+    rooms.forEach((room, meetingId) => {
+      const lastActivity = roomLastActivity.get(meetingId) || now;
+      // 测试会议室不自动结束
+      if (meetingId === defaultMeetingNo) return;
+      if (room.size === 0 && now - lastActivity > 60000) {
+        updateMeetingStatus(meetingId, 'ended');
+        deleteChatMessages(meetingId);
+        deleteParticipants(meetingId);
+        deleteMeeting(meetingId);
+        rooms.delete(meetingId);
+        roomLastActivity.delete(meetingId);
+      }
+    });
+  }, 30000);
+  
   httpServer.listen(PORT, () => {
     console.log(`CloudMeeting running on http://localhost:${PORT}`);
     console.log(`默认测试会议室会议号: ${defaultMeetingNo}`);

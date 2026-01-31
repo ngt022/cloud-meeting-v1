@@ -58,7 +58,7 @@
               <span class="status">{{ isMuted ? '静音' : '在线' }}</span>
             </div>
             <div class="actions">
-              <button v-if="!isHost" :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+              <button :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
                 <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
                 {{ isMuted ? '取消静音' : '静音' }}
               </button>
@@ -87,7 +87,7 @@
 
     <!-- 控制栏 -->
     <footer class="controls">
-      <button v-if="!isHost" :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+      <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
         <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
         {{ isMuted ? '取消静音' : '静音' }}
       </button>
