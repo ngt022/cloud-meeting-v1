@@ -69,9 +69,9 @@
           <div v-for="user in participants" :key="user.socketId" 
                class="participant-card"
                :class="{ 'muted': user.muted, 'is-host': user.isHost }">
-            <div class="avatar">{{ user.name.charAt(0).toUpperCase() }}</div>
+            <div class="avatar">{{ (user.name || '?').charAt(0).toUpperCase() }}</div>
             <div class="info">
-              <span class="name">{{ user.name }} {{ user.isHost ? '(主持人)' : '' }}</span>
+              <span class="name">{{ user.name || '匿名用户' }} {{ user.isHost ? '(主持人)' : '' }}</span>
               <span class="status">{{ user.muted ? '已静音' : '在线' }}</span>
             </div>
             <div class="actions" v-if="isHost && !user.isHost">
@@ -586,16 +586,29 @@ onMounted(async () => {
     
     // 监听远程音频流变化
     watch(() => webrtc.remoteAudioStreams.value, (streams) => {
-      console.log('[Watch] 远程音频流变化:', streams.size)
-      streams.forEach((stream, socketId) => {
-        console.log('[Watch] 播放远程音频:', socketId, '轨道数:', stream.getTracks().length)
-        playRemoteAudio(socketId, stream)
-      })
+      try {
+        console.log('[Watch] 远程音频流变化:', streams.size)
+        streams.forEach((stream, socketId) => {
+          try {
+            console.log('[Watch] 播放远程音频:', socketId, '轨道数:', stream.getTracks().length)
+            playRemoteAudio(socketId, stream)
+          } catch (e) {
+            console.error('[Watch] 播放远程音频错误:', e)
+          }
+        })
+      } catch (e) {
+        console.error('[Watch] 监听错误:', e)
+      }
     }, { deep: true })
   } catch (e) {
     console.error('[Error] 初始化失败:', e)
     alert('初始化失败，请刷新页面重试')
   }
+})
+
+// 全局错误处理，防止黑屏
+window.addEventListener('error', (e) => {
+  console.error('[Global Error]', e.error)
 })
 
 onUnmounted(() => {
