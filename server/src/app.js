@@ -328,16 +328,31 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
+// 使用 Render 持久化卷或临时目录
+const dbPath = process.env.DB_PATH || (process.env.RENDER ? '/var/data/meeting.db' : '/tmp/meeting.db');
+
 initDb().then(async () => {
   // 创建默认测试会议室
   const defaultMeetingNo = '8888888888'
-  const existingMeeting = getMeetingByNo(defaultMeetingNo)
-  if (!existingMeeting) {
-    const meeting = createMeeting('测试会议室', '主持人', null)
-    addParticipant(meeting.id, '主持人', true)
-    console.log(`已创建默认测试会议室，会议号: ${defaultMeetingNo}`)
-  } else {
-    console.log(`默认测试会议室已存在，会议号: ${defaultMeetingNo}`)
+  
+  // 尝试多次创建，确保数据库已准备好
+  let retries = 3
+  while (retries > 0) {
+    try {
+      const existingMeeting = getMeetingByNo(defaultMeetingNo)
+      if (!existingMeeting) {
+        const meeting = createMeeting('测试会议室', '主持人', null)
+        addParticipant(meeting.id, '主持人', true)
+        console.log(`已创建默认测试会议室，会议号: ${defaultMeetingNo}`)
+      } else {
+        console.log(`默认测试会议室已存在，会议号: ${defaultMeetingNo}`)
+      }
+      break
+    } catch (e) {
+      console.error('创建测试会议室失败，重试中...', e.message)
+      await new Promise(r => setTimeout(r, 1000))
+      retries--
+    }
   }
   
   // 清理定时任务，不自动清理测试会议室

@@ -12,6 +12,7 @@ const ICE_SERVERS = {
 
 // 本地音频流
 let localAudioStream = null
+let isMutedState = true  // 静音状态锁
 
 export function useWebRTC() {
   const socket = ref(null)
@@ -194,11 +195,20 @@ export function useWebRTC() {
 
   // 更新本地音频轨道状态（静音/取消静音）
   const updateLocalAudioTrack = (enabled) => {
-    console.log('[WebRTC] 更新本地音频轨道:', enabled)
+    // 使用状态锁，防止并发更新
+    const newState = enabled
+    if (newState === isMutedState) {
+      console.log('[WebRTC] 音频状态无变化，跳过:', newState)
+      return
+    }
+    isMutedState = newState
+    
+    console.log('[WebRTC] 更新本地音频轨道:', newState)
     if (localAudioStream) {
       localAudioStream.getAudioTracks().forEach(track => {
-        console.log('[WebRTC] 音频轨道 enabled:', track.enabled)
-        track.enabled = enabled
+        console.log('[WebRTC] 音频轨道设置 enabled:', newState, '原状态:', track.enabled)
+        track.enabled = newState
+        console.log('[WebRTC] 音频轨道实际 enabled:', track.enabled)
       })
     }
   }
@@ -228,6 +238,7 @@ export function useWebRTC() {
       localAudioStream.getTracks().forEach(t => t.stop())
       localAudioStream = null
     }
+    isMutedState = true  // 重置静音状态
   }
 
   // 检查是否静音

@@ -2,10 +2,16 @@ const initSqlJs = require('sql.js');
 const fs = require('fs');
 const path = require('path');
 
-const dbPath = process.env.DB_PATH || path.join('/tmp', 'meeting.db');
+// Render 持久化卷或临时目录
+const dbPath = process.env.DB_PATH || (process.env.RENDER ? '/var/data/meeting.db' : '/tmp/meeting.db');
 
 let db = null;
 let SQL = null;
+
+// 确保目录存在
+if (!fs.existsSync(path.dirname(dbPath))) {
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true })
+}
 
 const initDb = async () => {
   if (db) return db;
