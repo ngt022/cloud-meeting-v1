@@ -194,8 +194,10 @@ export function useWebRTC() {
 
   // 更新本地音频轨道状态（静音/取消静音）
   const updateLocalAudioTrack = (enabled) => {
+    console.log('[WebRTC] 更新本地音频轨道:', enabled)
     if (localAudioStream) {
       localAudioStream.getAudioTracks().forEach(track => {
+        console.log('[WebRTC] 音频轨道 enabled:', track.enabled)
         track.enabled = enabled
       })
     }

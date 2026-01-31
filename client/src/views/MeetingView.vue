@@ -515,6 +515,7 @@ const toggleMute = async () => {
   if (isHost.value) {
     isMuted.value = !isMuted.value
     webrtc.updateLocalAudioTrack(!isMuted.value)
+    console.log('[Audio] 主持人静音状态:', isMuted.value)
     // 主持人也需要通知其他用户静音状态变化
     socket.value?.emit('participant-muted', {
       meetingId: route.params.no,
@@ -529,6 +530,7 @@ const toggleMute = async () => {
   }
   isMuted.value = !isMuted.value
   webrtc.updateLocalAudioTrack(!isMuted.value)
+  console.log('[Audio] 静音状态变更:', isMuted.value)
   // 通知服务器静音状态变化
   socket.value?.emit('participant-muted', {
     meetingId: route.params.no,
