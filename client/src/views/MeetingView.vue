@@ -59,6 +59,7 @@
             </div>
             <div class="actions">
               <button v-if="!isHost" :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+                <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
                 {{ isMuted ? '取消静音' : '静音' }}
               </button>
               <button v-if="isHost" class="btn-end" @click="endMeeting">结束会议</button>
@@ -87,13 +88,14 @@
     <!-- 控制栏 -->
     <footer class="controls">
       <button v-if="!isHost" :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+        <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
         {{ isMuted ? '取消静音' : '静音' }}
       </button>
       <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
-        聊天
+        💬 聊天
       </button>
       <button class="control-btn leave" @click="leaveMeeting">
-        {{ isHost ? '离开会议' : '退出会议' }}
+        🚪 {{ isHost ? '结束会议' : '退出' }}
       </button>
     </footer>
 
@@ -546,21 +548,26 @@ const updateDuration = () => {
 }
 
 onMounted(async () => {
-  localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
-  localStorage.setItem('userName', localName.value)
-  await fetchMeeting()
-  await startAudio()
-  connectSocket()
-  timer = setInterval(updateDuration, 1000)
-  
-  // 监听远程音频流变化
-  watch(() => webrtc.remoteAudioStreams.value, (streams) => {
-    console.log('[Watch] 远程音频流变化:', streams.size)
-    streams.forEach((stream, socketId) => {
-      console.log('[Watch] 播放远程音频:', socketId, '轨道数:', stream.getTracks().length)
-      playRemoteAudio(socketId, stream)
-    })
-  }, { deep: true })
+  try {
+    localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
+    localStorage.setItem('userName', localName.value)
+    await fetchMeeting()
+    await startAudio()
+    connectSocket()
+    timer = setInterval(updateDuration, 1000)
+    
+    // 监听远程音频流变化
+    watch(() => webrtc.remoteAudioStreams.value, (streams) => {
+      console.log('[Watch] 远程音频流变化:', streams.size)
+      streams.forEach((stream, socketId) => {
+        console.log('[Watch] 播放远程音频:', socketId, '轨道数:', stream.getTracks().length)
+        playRemoteAudio(socketId, stream)
+      })
+    }, { deep: true })
+  } catch (e) {
+    console.error('[Error] 初始化失败:', e)
+    alert('初始化失败，请刷新页面重试')
+  }
 })
 
 onUnmounted(() => {
@@ -571,15 +578,28 @@ onUnmounted(() => {
 
 // 播放远程音频
 const playRemoteAudio = (socketId, stream) => {
-  let audioEl = audioElements.value.get(socketId)
-  if (!audioEl) {
-    audioEl = new Audio()
-    audioEl.autoplay = true
-    audioElements.value.set(socketId, audioEl)
-  }
-  if (audioEl.srcObject !== stream) {
-    audioEl.srcObject = stream
-    audioEl.play().catch(e => console.warn('播放远程音频失败:', e))
+  try {
+    let audioEl = audioElements.value.get(socketId)
+    if (!audioEl) {
+      audioEl = new Audio()
+      audioEl.setSinkId && audioEl.setSinkId('default').catch(() => {})
+      audioElements.value.set(socketId, audioEl)
+    }
+    if (audioEl.srcObject !== stream) {
+      audioEl.srcObject = stream
+      audioEl.play().then(() => {
+        console.log('[Audio] 播放成功')
+      }).catch(e => {
+        console.warn('[Audio] 播放需要用户交互:', e.message)
+        // 延迟播放，等待用户交互
+        const tryPlay = () => {
+          audioEl.play().catch(() => {})
+        }
+        document.addEventListener('click', tryPlay, { once: true })
+      })
+    }
+  } catch (e) {
+    console.error('[Audio] 播放错误:', e)
   }
 }
 </script>
@@ -781,10 +801,15 @@ const playRemoteAudio = (socketId, stream) => {
   background: #222;
   color: #fff;
   border: 1px solid #333;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .btn-action:hover { background: #333; }
 .btn-action.active { background: #fff; color: #000; border-color: #fff; }
 .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.mute-icon { font-size: 14px; }
 
 .btn-remove {
   background: transparent;
@@ -828,6 +853,7 @@ const playRemoteAudio = (socketId, stream) => {
 .control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .control-btn.leave { background: #444; }
 .control-btn.leave:hover { background: #555; }
+.control-btn .control-icon { font-size: 16px; }
 
 .chat-panel {
   position: fixed;
