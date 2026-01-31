@@ -54,15 +54,15 @@
           <div class="participant-card host" :class="{ 'is-self': true }">
             <div class="avatar host-avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
             <div class="info">
-              <span class="name">{{ localName }} {{ isHost ? '(主持人)' : '' }}</span>
+              <span class="name">{{ localName }} <span v-if="isHost" class="role-tag host">主持人</span></span>
               <span class="status">{{ getLocalStatus() }}</span>
             </div>
             <div class="actions">
               <!-- 主持人控制 -->
               <template v-if="isHost">
-                <button :class="['btn-action', isMuted && 'active']" @click="toggleMute">
+                <button :class="['btn-action', !isMuted && 'active']" @click="toggleMute">
                   <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-                  {{ isMuted ? '取消静音' : '静音' }}
+                  {{ isMuted ? '静音' : '发言中' }}
                 </button>
                 <button class="btn-end" @click="endMeeting">结束会议</button>
               </template>
@@ -74,9 +74,9 @@
                 <button v-if="handRaised" class="btn-action hand-raised" @click="lowerHand">
                   🙋 已举手中
                 </button>
-                <button :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+                <button :class="['btn-action', !isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
                   <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-                  {{ isMuted ? '取消静音' : '静音' }}
+                  {{ isMuted ? '静音' : '发言中' }}
                 </button>
               </template>
             </div>
@@ -113,9 +113,9 @@
     <footer class="controls">
       <!-- 主持人控制 -->
       <template v-if="isHost">
-        <button :class="['control-btn', isMuted && 'active']" @click="toggleMute">
+        <button :class="['control-btn', !isMuted && 'active']" @click="toggleMute">
           <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-          {{ isMuted ? '取消静音' : '静音' }}
+          {{ isMuted ? '静音' : '发言中' }}
         </button>
         <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
           💬 聊天
@@ -130,9 +130,9 @@
         <button v-if="handRaised" class="control-btn hand-raised" @click="lowerHand">
           🙋 取消举手
         </button>
-        <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+        <button :class="['control-btn', !isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
           <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-          {{ isMuted ? '取消静音' : '静音' }}
+          {{ isMuted ? '静音' : '发言中' }}
         </button>
         <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
           💬 聊天
@@ -230,7 +230,7 @@ const chatMsg = ref('')
 const duration = ref('00:00')
 const startTime = Date.now()
 
-const canSpeak = computed(() => isHost.value || !isMuted.value)
+const canSpeak = computed(() => isHost.value || (localParticipantId.value && !isMuted.value))
 
 const toggleDanmaku = () => {
   showDanmaku.value = !showDanmaku.value

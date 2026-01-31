@@ -161,7 +161,7 @@ const quickJoin = async (item) => {
 
 const joinTestMeeting = async () => {
   const testMeetingNo = '8888888888'
-  const name = localStorage.getItem('userName') || '测试用户'
+  const userName = localStorage.getItem('userName') || '测试用户'
   
   try {
     // 先检查会议是否存在
@@ -169,11 +169,10 @@ const joinTestMeeting = async () => {
     const data = await res.json()
     
     if (data.success) {
-      // 会议存在，加入时使用"主持人"身份
-      localStorage.setItem('userName', '主持人')
+      // 会议存在，加入时使用用户名
       router.push({
         path: '/meeting',
-        query: { no: testMeetingNo, name: '主持人' }
+        query: { no: testMeetingNo, name: userName }
       })
     } else {
       // 会议不存在，创建新的测试会议室
@@ -183,13 +182,18 @@ const joinTestMeeting = async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: '测试会议室',
-          hostName: name,
+          hostName: userName,
           password: undefined
         })
       })
       const createData = await createRes.json()
       if (createData.success) {
-        router.push(`/meeting/${createData.data.meetingNo}`)
+        // 保存用户名
+        localStorage.setItem('userName', userName)
+        router.push({
+          path: `/meeting/${createData.data.meetingNo}`,
+          query: { name: userName }
+        })
       } else {
         alert('创建测试会议室失败')
       }
@@ -220,13 +224,19 @@ const createMeeting = async () => {
       showCreateModal.value = false
       createForm.value = { title: '', name: '', password: '' }
       
+      // 保存用户名到 localStorage
+      localStorage.setItem('userName', createForm.value.name)
+      
       // Save to history
       saveHistory({
         title: data.data.title,
         meetingNo: data.data.meetingNo
       })
       
-      router.push(`/meeting/${data.data.meetingNo}`)
+      router.push({
+        path: `/meeting/${data.data.meetingNo}`,
+        query: { name: createForm.value.name }
+      })
     } else {
       alert(data.message || '创建失败')
     }
@@ -270,13 +280,19 @@ const joinMeeting = async () => {
         showJoinModal.value = false
         joinForm.value = { no: '', name: '', password: '' }
         
+        // 保存用户名
+        localStorage.setItem('userName', joinForm.value.name)
+        
         // Save to history
         saveHistory({
           title: meeting.title,
           meetingNo: meeting.meetingNo
         })
         
-        router.push(`/meeting/${meeting.meetingNo}`)
+        router.push({
+          path: `/meeting/${meeting.meetingNo}`,
+          query: { name: joinForm.value.name }
+        })
       } else {
         alert(joinData.message || '加入失败')
       }
