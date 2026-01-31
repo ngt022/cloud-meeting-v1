@@ -273,6 +273,30 @@ io.on('connection', (socket) => {
     }
   });
 
+  // WebRTC 信令：转发 offer
+  socket.on('webrtc-offer', ({ meetingId, targetSocketId, offer }) => {
+    socket.to(targetSocketId).emit('webrtc-offer', {
+      fromSocketId: socket.id,
+      offer
+    });
+  });
+
+  // WebRTC 信令：转发 answer
+  socket.on('webrtc-answer', ({ meetingId, targetSocketId, answer }) => {
+    socket.to(targetSocketId).emit('webrtc-answer', {
+      fromSocketId: socket.id,
+      answer
+    });
+  });
+
+  // WebRTC 信令：转发 ICE candidate
+  socket.on('webrtc-ice-candidate', ({ meetingId, targetSocketId, candidate }) => {
+    socket.to(targetSocketId).emit('webrtc-ice-candidate', {
+      fromSocketId: socket.id,
+      candidate
+    });
+  });
+
   socket.on('leave-room', ({ meetingId }) => {
     updateActivity(meetingId);
     socket.leave(`room:${meetingId}`);

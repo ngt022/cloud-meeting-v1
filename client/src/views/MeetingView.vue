@@ -150,12 +150,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
+import { useWebRTC } from '../composables/useWebRTC'
 
 const route = useRoute()
 const router = useRouter()
+
+// WebRTC
+const webrtc = useWebRTC()
+const audioElements = ref(new Map())
 
 const meeting = ref(null)
 const participants = ref([])
@@ -256,7 +261,7 @@ const endMeeting = async () => {
     await fetch(`/api/meetings/${meeting.value.id}/end`, { method: 'POST' })
     socket.value?.emit('leave-room', { meetingId: route.params.no })
     socket.value?.disconnect()
-    stopAudio()
+    webrtc.cleanup()
     alert('会议已结束')
     router.push('/')
   } catch (e) {
@@ -293,11 +298,11 @@ const removeParticipant = async (user) => {
 
 const startAudio = async () => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    })
-    window.localAudioStream = stream
-    monitorAudioQuality(stream)
+    const stream = await webrtc.initLocalAudio()
+    if (stream) {
+      window.localAudioStream = stream
+      monitorAudioQuality(stream)
+    }
   } catch (e) {
     console.warn('无法访问麦克风:', e)
   }
@@ -325,10 +330,8 @@ const monitorAudioQuality = (stream) => {
 }
 
 const stopAudio = () => {
-  if (window.localAudioStream) {
-    window.localAudioStream.getTracks().forEach(t => t.stop())
-    window.localAudioStream = null
-  }
+  webrtc.cleanup()
+  window.localAudioStream = null
 }
 
 const connectSocket = () => {
@@ -337,6 +340,9 @@ const connectSocket = () => {
     reconnection: true,
     reconnectionAttempts: 5
   })
+  
+  // 初始化 WebRTC
+  webrtc.setup(socket.value, route.params.no)
   
   socket.value.on('connect', () => {
     socket.value.emit('join-room', {
@@ -350,11 +356,15 @@ const connectSocket = () => {
   socket.value.on('room-users', (users) => {
     // 过滤掉自己，只显示其他参与者
     participants.value = users.filter(u => u.socketId !== socket.value.id)
+    // 为所有现有用户创建 WebRTC 连接
+    webrtc.connectToAllPeers(users)
   })
 
   socket.value.on('user-joined', (user) => {
     participants.value.push(user)
     messages.value.push({ name: '系统', content: `${user.participantName} 加入了会议`, isSelf: false })
+    // 处理新用户加入，创建连接
+    webrtc.handleUserJoined(user)
   })
 
   socket.value.on('user-left', ({ socketId, participantId }) => {
@@ -363,6 +373,21 @@ const connectSocket = () => {
       messages.value.push({ name: '系统', content: `${user.name} 离开了会议`, isSelf: false })
     }
     participants.value = participants.value.filter(p => p.socketId !== socketId && p.id !== participantId)
+    // 清理 WebRTC 连接
+    webrtc.handleUserLeft({ socketId })
+  })
+
+  // WebRTC 信令处理
+  socket.value.on('webrtc-offer', async (data) => {
+    await webrtc.handleOffer(data)
+  })
+
+  socket.value.on('webrtc-answer', async (data) => {
+    await webrtc.handleAnswer(data)
+  })
+
+  socket.value.on('webrtc-ice-candidate', async (data) => {
+    await webrtc.handleIceCandidate(data)
   })
 
   socket.value.on('chat-message', (msg) => {
@@ -392,9 +417,7 @@ const connectSocket = () => {
   socket.value.on('participant-muted', ({ participantId, muted }) => {
     if (participantId === localParticipantId.value) {
       isMuted.value = muted
-      if (window.localAudioStream) {
-        window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !muted)
-      }
+      webrtc.updateLocalAudioTrack(!muted)
     }
     const user = participants.value.find(p => p.id === participantId)
     if (user) user.muted = muted
@@ -403,7 +426,7 @@ const connectSocket = () => {
   socket.value.on('participant-removed', ({ participantId }) => {
     if (participantId === localParticipantId.value) {
       alert('您已被移出会议')
-      stopAudio()
+      webrtc.cleanup()
       socket.value?.disconnect()
       router.push('/')
     } else {
@@ -427,7 +450,7 @@ const connectSocket = () => {
 
   socket.value.on('meeting-ended', () => {
     alert('会议已结束')
-    stopAudio()
+    webrtc.cleanup()
     socket.value?.disconnect()
     router.push('/')
   })
@@ -459,9 +482,7 @@ const fetchMeeting = async () => {
 const toggleMute = async () => {
   if (isHost.value) {
     isMuted.value = !isMuted.value
-    if (window.localAudioStream) {
-      window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
-    }
+    webrtc.updateLocalAudioTrack(!isMuted.value)
     // 主持人也需要通知其他用户静音状态变化
     socket.value?.emit('participant-muted', {
       meetingId: route.params.no,
@@ -475,9 +496,7 @@ const toggleMute = async () => {
     return
   }
   isMuted.value = !isMuted.value
-  if (window.localAudioStream) {
-    window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
-  }
+  webrtc.updateLocalAudioTrack(!isMuted.value)
   // 通知服务器静音状态变化
   socket.value?.emit('participant-muted', {
     meetingId: route.params.no,
@@ -511,7 +530,7 @@ const sendMessage = async () => {
 const leaveMeeting = () => {
   socket.value?.emit('leave-room', { meetingId: route.params.no })
   socket.value?.disconnect()
-  stopAudio()
+  webrtc.cleanup()
   router.push('/')
 }
 
@@ -524,18 +543,40 @@ const updateDuration = () => {
 }
 
 onMounted(async () => {
-  localName.value = route.query.name || localStorage.getItem('userName') || ''
+  localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
+  localStorage.setItem('userName', localName.value)
   await fetchMeeting()
   await startAudio()
   connectSocket()
   timer = setInterval(updateDuration, 1000)
+  
+  // 监听远程音频流变化
+  watch(() => webrtc.remoteAudioStreams.value, (streams) => {
+    streams.forEach((stream, socketId) => {
+      playRemoteAudio(socketId, stream)
+    })
+  }, { deep: true })
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
-  stopAudio()
+  webrtc.cleanup()
   socket.value?.disconnect()
 })
+
+// 播放远程音频
+const playRemoteAudio = (socketId, stream) => {
+  let audioEl = audioElements.value.get(socketId)
+  if (!audioEl) {
+    audioEl = new Audio()
+    audioEl.autoplay = true
+    audioElements.value.set(socketId, audioEl)
+  }
+  if (audioEl.srcObject !== stream) {
+    audioEl.srcObject = stream
+    audioEl.play().catch(e => console.warn('播放远程音频失败:', e))
+  }
+}
 </script>
 
 <style scoped>
