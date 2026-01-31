@@ -13,9 +13,6 @@
       <button class="btn-secondary large" @click="showJoinModal = true">
         加入会议
       </button>
-      <button class="btn-test large" @click="joinTestMeeting">
-        🚀 测试会议室
-      </button>
     </div>
 
     <!-- 会议历史 -->
@@ -157,51 +154,6 @@ const formatTime = (timestamp) => {
 
 const quickJoin = async (item) => {
   router.push(`/meeting/${item.meetingNo}`)
-}
-
-const joinTestMeeting = async () => {
-  const testMeetingNo = '8888888888'
-  const userName = localStorage.getItem('userName') || '测试用户'
-  
-  try {
-    // 先检查会议是否存在
-    const res = await fetch(`/api/meetings/${testMeetingNo}`)
-    const data = await res.json()
-    
-    if (data.success) {
-      // 会议存在，加入时使用用户名
-      router.push({
-        path: '/meeting',
-        query: { no: testMeetingNo, name: userName }
-      })
-    } else {
-      // 会议不存在，创建新的测试会议室
-      console.log('测试会议室不存在，自动创建...')
-      const createRes = await fetch('/api/meetings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: '测试会议室',
-          hostName: userName,
-          password: undefined
-        })
-      })
-      const createData = await createRes.json()
-      if (createData.success) {
-        // 保存用户名
-        localStorage.setItem('userName', userName)
-        router.push({
-          path: `/meeting/${createData.data.meetingNo}`,
-          query: { name: userName }
-        })
-      } else {
-        alert('创建测试会议室失败')
-      }
-    }
-  } catch (e) {
-    console.error('连接失败:', e)
-    alert('连接失败，请稍后重试')
-  }
 }
 
 const createMeeting = async () => {
