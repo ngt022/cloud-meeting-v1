@@ -54,6 +54,7 @@ export function useWebRTC() {
 
     // 处理 ICE candidate
     pc.onicecandidate = (event) => {
+      console.log('[WebRTC] ICE candidate 生成:', event.candidate ? '有' : 'null')
       if (event.candidate && socket.value) {
         socket.value.emit('webrtc-ice-candidate', {
           meetingId: meetingId.value,
@@ -65,19 +66,22 @@ export function useWebRTC() {
 
     // 处理远程轨道
     pc.ontrack = (event) => {
+      console.log('[WebRTC] 收到远程轨道:', targetSocketId)
       const [stream] = event.streams
+      console.log('[WebRTC] 远程流轨道数:', stream.getTracks().length)
       remoteAudioStreams.value.set(targetSocketId, stream)
     }
 
     // 连接状态变化
     pc.onconnectionstatechange = () => {
-      console.log(`与 ${targetSocketId} 的连接状态:`, pc.connectionState)
+      console.log(`[WebRTC] 与 ${targetSocketId} 的连接状态:`, pc.connectionState)
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         handleConnectionFailure(targetSocketId)
       }
     }
 
     peerConnections.value.set(targetSocketId, pc)
+    console.log('[WebRTC] 创建对等连接:', targetSocketId, '当前总数:', peerConnections.value.size)
     return pc
   }
 
@@ -95,56 +99,67 @@ export function useWebRTC() {
   const createOffer = async (targetSocketId) => {
     const pc = createPeerConnection(targetSocketId)
     try {
+      console.log('[WebRTC] 创建 offer:', targetSocketId)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
+      console.log('[WebRTC] 发送 offer:', targetSocketId)
       socket.value.emit('webrtc-offer', {
         meetingId: meetingId.value,
         targetSocketId,
         offer
       })
     } catch (e) {
-      console.error('创建 offer 失败:', e)
+      console.error('[WebRTC] 创建 offer 失败:', e)
     }
   }
 
   // 处理收到的 offer
   const handleOffer = async ({ fromSocketId, offer }) => {
+    console.log('[WebRTC] 收到 offer:', fromSocketId)
     const pc = createPeerConnection(fromSocketId)
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
+      console.log('[WebRTC] 发送 answer:', fromSocketId)
       socket.value.emit('webrtc-answer', {
         meetingId: meetingId.value,
         targetSocketId: fromSocketId,
         answer
       })
     } catch (e) {
-      console.error('处理 offer 失败:', e)
+      console.error('[WebRTC] 处理 offer 失败:', e)
     }
   }
 
   // 处理收到的 answer
   const handleAnswer = async ({ fromSocketId, answer }) => {
+    console.log('[WebRTC] 收到 answer:', fromSocketId)
     const pc = peerConnections.value.get(fromSocketId)
     if (pc) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
+        console.log('[WebRTC] 设置远程描述成功:', fromSocketId)
       } catch (e) {
-        console.error('处理 answer 失败:', e)
+        console.error('[WebRTC] 处理 answer 失败:', e)
       }
+    } else {
+      console.warn('[WebRTC] 未找到对等连接:', fromSocketId)
     }
   }
 
   // 处理收到的 ICE candidate
   const handleIceCandidate = async ({ fromSocketId, candidate }) => {
+    console.log('[WebRTC] 收到 ICE candidate:', fromSocketId)
     const pc = peerConnections.value.get(fromSocketId)
     if (pc) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
       } catch (e) {
-        console.error('添加 ICE candidate 失败:', e)
+        console.error('[WebRTC] 添加 ICE candidate 失败:', e)
       }
+    } else {
+      console.warn('[WebRTC] 添加 ICE candidate 时未找到连接:', fromSocketId)
     }
   }
 
@@ -167,12 +182,14 @@ export function useWebRTC() {
 
   // 处理用户离开
   const handleUserLeft = ({ socketId }) => {
+    console.log('[WebRTC] 用户离开:', socketId)
     const pc = peerConnections.value.get(socketId)
     if (pc) {
       pc.close()
       peerConnections.value.delete(socketId)
     }
     remoteAudioStreams.value.delete(socketId)
+    console.log('[WebRTC] 清理完成，剩余连接:', peerConnections.value.size)
   }
 
   // 更新本地音频轨道状态（静音/取消静音）

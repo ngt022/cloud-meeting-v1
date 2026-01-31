@@ -379,14 +379,17 @@ const connectSocket = () => {
 
   // WebRTC 信令处理
   socket.value.on('webrtc-offer', async (data) => {
+    console.log('[Socket] 收到 webrtc-offer')
     await webrtc.handleOffer(data)
   })
 
   socket.value.on('webrtc-answer', async (data) => {
+    console.log('[Socket] 收到 webrtc-answer')
     await webrtc.handleAnswer(data)
   })
 
   socket.value.on('webrtc-ice-candidate', async (data) => {
+    console.log('[Socket] 收到 webrtc-ice-candidate')
     await webrtc.handleIceCandidate(data)
   })
 
@@ -552,7 +555,9 @@ onMounted(async () => {
   
   // 监听远程音频流变化
   watch(() => webrtc.remoteAudioStreams.value, (streams) => {
+    console.log('[Watch] 远程音频流变化:', streams.size)
     streams.forEach((stream, socketId) => {
+      console.log('[Watch] 播放远程音频:', socketId, '轨道数:', stream.getTracks().length)
       playRemoteAudio(socketId, stream)
     })
   }, { deep: true })
