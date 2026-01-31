@@ -54,27 +54,50 @@
           <div class="participant-card host" :class="{ 'is-self': true }">
             <div class="avatar host-avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
             <div class="info">
-              <span class="name">{{ localName || '我' }} {{ isHost ? '(主持人)' : '' }}</span>
-              <span class="status">{{ isMuted ? '静音' : '在线' }}</span>
+              <span class="name">{{ localName }} {{ isHost ? '(主持人)' : '' }}</span>
+              <span class="status">{{ getLocalStatus() }}</span>
             </div>
             <div class="actions">
-              <button :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
-                <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-                {{ isMuted ? '取消静音' : '静音' }}
-              </button>
-              <button v-if="isHost" class="btn-end" @click="endMeeting">结束会议</button>
+              <!-- 主持人控制 -->
+              <template v-if="isHost">
+                <button class="btn-action" :class="{ active: isAllMuted }" @click="toggleMuteAll">
+                  {{ isAllMuted ? '解除全员禁言' : '全员禁言' }}
+                </button>
+                <button class="btn-end" @click="endMeeting">结束会议</button>
+              </template>
+              <!-- 听众控制 -->
+              <template v-else>
+                <button v-if="!handRaised && isMuted" class="btn-action hand-raise" @click="raiseHand">
+                  🙋 举手发言
+                </button>
+                <button v-if="handRaised" class="btn-action hand-raised" @click="lowerHand">
+                  🙋 已举手中
+                </button>
+                <button :class="['btn-action', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+                  <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
+                  {{ isMuted ? '取消静音' : '静音' }}
+                </button>
+              </template>
             </div>
           </div>
           
           <div v-for="user in participants" :key="user.socketId" 
                class="participant-card"
-               :class="{ 'muted': user.muted, 'is-host': user.isHost }">
-            <div class="avatar">{{ (user.name || '?').charAt(0).toUpperCase() }}</div>
+               :class="{ 'muted': user.muted, 'hand-raised': user.handRaised, 'can-speak': user.canSpeak }">
+            <div class="avatar" :class="{ 'host-avatar': user.isHost }">{{ (user.name || '?').charAt(0).toUpperCase() }}</div>
             <div class="info">
-              <span class="name">{{ user.name || '匿名用户' }} {{ user.isHost ? '(主持人)' : '' }}</span>
-              <span class="status">{{ user.muted ? '已静音' : '在线' }}</span>
+              <span class="name">
+                {{ user.name || '匿名用户' }}
+                <span v-if="user.isHost" class="role-tag host">主持人</span>
+                <span v-else-if="user.canSpeak" class="role-tag speaker">发言中</span>
+                <span v-else-if="user.handRaised" class="role-tag hand-raised">举手</span>
+              </span>
+              <span class="status">{{ getUserStatus(user) }}</span>
             </div>
             <div class="actions" v-if="isHost && !user.isHost">
+              <button v-if="user.handRaised" class="btn-action allow" @click="allowSpeak(user)">
+                ✓ 允许发言
+              </button>
               <button :class="['btn-action', user.muted && 'active']" @click="muteParticipant(user)">
                 {{ user.muted ? '取消静音' : '静音' }}
               </button>
@@ -87,49 +110,52 @@
 
     <!-- 控制栏 -->
     <footer class="controls">
-      <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
-        <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-        {{ isMuted ? '取消静音' : '静音' }}
-      </button>
-      <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
-        💬 聊天
-      </button>
-      <button class="control-btn leave" @click="leaveMeeting">
-        🚪 {{ isHost ? '结束会议' : '退出' }}
-      </button>
+      <!-- 主持人控制 -->
+      <template v-if="isHost">
+        <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+          <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
+          {{ isMuted ? '取消静音' : '静音' }}
+        </button>
+        <button :class="['control-btn', isAllMuted && 'active']" @click="toggleMuteAll">
+          {{ isAllMuted ? '解除全员禁言' : '全员禁言' }}
+        </button>
+        <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
+          💬 聊天
+        </button>
+        <button class="control-btn leave" @click="endMeeting">结束会议</button>
+      </template>
+      <!-- 听众控制 -->
+      <template v-else>
+        <button v-if="!handRaised && isMuted" class="control-btn hand-raise" @click="raiseHand">
+          🙋 举手发言
+        </button>
+        <button v-if="handRaised" class="control-btn hand-raised" @click="lowerHand">
+          🙋 取消举手
+        </button>
+        <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+          <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
+          {{ isMuted ? '取消静音' : '静音' }}
+        </button>
+        <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
+          💬 聊天
+        </button>
+        <button class="control-btn leave" @click="leaveMeeting">退出会议</button>
+      </template>
     </footer>
 
     <!-- 聊天面板 -->
     <aside class="chat-panel" v-if="showChat">
       <div class="chat-header">
         <span>聊天</span>
-        <div class="chat-actions">
-          <button class="btn-emoji" @click="showEmojiPicker = !showEmojiPicker">😊</button>
-          <button @click="showChat = false">X</button>
-        </div>
+        <button @click="showChat = false" class="btn-close-chat">X</button>
       </div>
       
       <!-- 会议信息栏 -->
       <div class="meeting-bar">
         <span class="meeting-no-display">{{ meeting?.meetingNo }}</span>
         <button class="btn-copy-no" @click="copyMeetingNo" :class="{ copied: noCopied }">
-          {{ noCopied ? '已复制' : '复制会议号' }}
+          {{ noCopied ? '已复制' : '复制' }}
         </button>
-        <button class="btn-copy-link-chat" @click="copyLink" :class="{ copied: copied }">
-          {{ copied ? '链接已复制' : '复制链接' }}
-        </button>
-      </div>
-      
-      <!-- 表情面板 -->
-      <div class="emoji-picker" v-if="showEmojiPicker">
-        <div class="emoji-section" v-for="(emojis, category) in emojiCategories" :key="category">
-          <span 
-            v-for="emoji in emojis" 
-            :key="emoji"
-            class="emoji-item"
-            @click="insertEmoji(emoji)"
-          >{{ emoji }}</span>
-        </div>
       </div>
       
       <div class="chat-messages" ref="chatContainer">
@@ -145,7 +171,7 @@
           @keyup.enter="sendMessage"
           ref="chatInput"
         />
-        <button @click="sendMessage">发送</button>
+        <button class="btn-send" @click="sendMessage">发送</button>
       </div>
     </aside>
   </div>
@@ -177,32 +203,20 @@ const isHost = ref(false)
 const locked = ref(false)
 const isSpeaking = ref(false)
 const showDanmaku = ref(true)
-const showEmojiPicker = ref(false)
 const activeDanmakus = ref([])
 let danmakuId = 0
 
-const emojiCategories = {
-  '常用': ['😀','😃','😄','😁','😅','😂','🤣','😊','😇','🙂','😉','😌','😍','🥰','😘','😗','😙','😚','😋','😛','😜','🤪','😝','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','😮','🤯','😱','😨','😰','😥','😢','😭','😤','😠','😡','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖'],
-  '手势': ['👋','🤚','🖐️','✋','🖖','👌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪'],
-  '物品': ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','🔥','✨','🌟','💫','💥','💢','💦','💧','💤','💢','💣','💬','👁️‍🗨️','🗨️','💭','💤','👋🏻','👋','👋🏼','👋🏽','👋🏾','👋🏿'],
-  '符号': ['👍','👎','✊','👊','🤛','🤜','👏','🙌','🆗','🆙','🆖','🈵','🈶','🈚','🈸','🈺','🈷️','✖️','➕','➖','➗','💲','💱','™️','©️','®️','👁️','🕐','🕑','🕒','🕓','🕔','🕕','🕖','🕗','🕘','🕙','🕚','🕛','🕜']
-}
-
 const socket = ref(null)
-const isJoined = ref(false)  // 标记是否已加入房间
+const isJoined = ref(false)
+const isAllMuted = ref(false)  // 全员禁言状态
+const handRaised = ref(false)  // 是否举手
 const isMuted = ref(true)
 const showChat = ref(false)
 const chatMsg = ref('')
 const duration = ref('00:00')
 const startTime = Date.now()
 
-const canSpeak = computed(() => isHost.value || !locked.value)
-
-const insertEmoji = (emoji) => {
-  chatMsg.value += emoji
-  showEmojiPicker.value = false
-  chatInput.value?.focus()
-}
+const canSpeak = computed(() => isHost.value || !isMuted.value)
 
 const toggleDanmaku = () => {
   showDanmaku.value = !showDanmaku.value
@@ -483,6 +497,75 @@ const connectSocket = () => {
     socket.value?.disconnect()
     router.push('/')
   })
+
+  // 举手事件
+  socket.value.on('hand-raised', (data) => {
+    const user = participants.value.find(p => p.socketId === data.socketId)
+    if (user) {
+      user.handRaised = true
+      messages.value.push({ name: '系统', content: `${data.participantName} 举手申请发言`, isSelf: false })
+    }
+  })
+
+  socket.value.on('hand-lowered', (data) => {
+    const user = participants.value.find(p => p.socketId === data.socketId)
+    if (user) {
+      user.handRaised = false
+    }
+  })
+
+  // 允许发言事件
+  socket.value.on('speaker-allowed', (data) => {
+    if (data.socketId === socket.value.id) {
+      // 是自己被允许发言
+      isMuted.value = false
+      handRaised.value = false
+      webrtc.updateLocalAudioTrack(true)
+    }
+    const user = participants.value.find(p => p.socketId === data.socketId)
+    if (user) {
+      user.canSpeak = true
+      user.handRaised = false
+      user.muted = false
+      messages.value.push({ name: '系统', content: `${data.participantName} 已被允许发言`, isSelf: false })
+    }
+  })
+
+  // 禁止发言事件
+  socket.value.on('speaker-disallowed', (data) => {
+    if (data.socketId === socket.value.id) {
+      // 是自己被禁止发言
+      isMuted.value = true
+      handRaised.value = false
+      webrtc.updateLocalAudioTrack(false)
+    }
+    const user = participants.value.find(p => p.socketId === data.socketId)
+    if (user) {
+      user.canSpeak = false
+      user.muted = true
+    }
+  })
+
+  // 全员禁言事件
+  socket.value.on('all-muted', () => {
+    isAllMuted.value = true
+    if (!isHost.value) {
+      isMuted.value = true
+      handRaised.value = false
+      webrtc.updateLocalAudioTrack(false)
+    }
+    messages.value.push({ name: '系统', content: '主持人已开启全员禁言', isSelf: false })
+  })
+
+  // 解除全员禁言事件
+  socket.value.on('all-unmuted', () => {
+    isAllMuted.value = false
+    if (!isHost.value) {
+      isMuted.value = false
+      webrtc.updateLocalAudioTrack(true)
+    }
+    messages.value.push({ name: '系统', content: '主持人已解除全员禁言', isSelf: false })
+  })
 }
 
 const fetchMeeting = async () => {
@@ -534,6 +617,59 @@ const toggleMute = async () => {
     participantId: localParticipantId.value,
     muted: isMuted.value
   })
+}
+
+// 获取本地用户状态显示
+const getLocalStatus = () => {
+  if (isHost.value) return '主持人'
+  if (isMuted.value) {
+    if (handRaised.value) return '等待发言中...'
+    return '静音中'
+  }
+  return '在线'
+}
+
+// 获取用户状态显示
+const getUserStatus = (user) => {
+  if (user.isHost) return '主持人'
+  if (user.muted) {
+    if (user.handRaised) return '举手申请发言'
+    return '已静音'
+  }
+  return '在线'
+}
+
+// 举手发言
+const raiseHand = () => {
+  handRaised.value = true
+  socket.value?.emit('raise-hand', { meetingId: route.params.no })
+}
+
+// 取消举手
+const lowerHand = () => {
+  handRaised.value = false
+  socket.value?.emit('lower-hand', { meetingId: route.params.no })
+}
+
+// 允许用户发言
+const allowSpeak = (user) => {
+  socket.value?.emit('allow-speak', {
+    meetingId: route.params.no,
+    targetSocketId: user.socketId
+  })
+}
+
+// 全员禁言/解除禁言
+const toggleMuteAll = async () => {
+  if (isAllMuted.value) {
+    // 解除全员禁言
+    socket.value?.emit('unmute-all', { meetingId: route.params.no })
+    isAllMuted.value = false
+  } else {
+    // 全员禁言
+    socket.value?.emit('mute-all', { meetingId: route.params.no })
+    isAllMuted.value = true
+  }
 }
 
 const sendMessage = async () => {
@@ -800,6 +936,13 @@ const playRemoteAudio = (socketId, stream) => {
 
 .participant-card:hover { border-color: #333; }
 .participant-card.muted { opacity: 0.5; }
+.participant-card.hand-raised {
+  border-color: #ff9800;
+  box-shadow: 0 0 10px rgba(255, 152, 0, 0.3);
+}
+.participant-card.can-speak {
+  border-color: #4caf50;
+}
 .participant-card.is-host { 
   border-color: #ffd700; 
   background: linear-gradient(135deg, #1a1a1a 0%, #141414 100%);
@@ -818,14 +961,40 @@ const playRemoteAudio = (socketId, stream) => {
   font-weight: 500;
 }
 
-.host-avatar {
+.avatar.host-avatar {
   background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
   color: #000;
 }
 
 .info { flex: 1; }
-.info .name { display: block; color: #fff; font-size: 16px; margin-bottom: 4px; }
+.info .name { 
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff; 
+  font-size: 16px; 
+  margin-bottom: 4px; 
+}
 .info .status { color: #666; font-size: 12px; }
+
+.role-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  letter-spacing: 1px;
+}
+.role-tag.host {
+  background: #ffd700;
+  color: #000;
+}
+.role-tag.speaker {
+  background: #4caf50;
+  color: #fff;
+}
+.role-tag.hand-raised {
+  background: #ff9800;
+  color: #fff;
+}
 
 .actions { display: flex; gap: 8px; }
 
@@ -848,6 +1017,11 @@ const playRemoteAudio = (socketId, stream) => {
 .btn-action:hover { background: #333; }
 .btn-action.active { background: #fff; color: #000; border-color: #fff; }
 .btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-action.allow { background: #4caf50; border-color: #4caf50; }
+.btn-action.allow:hover { background: #45a049; }
+.btn-action.hand-raise { background: #ff9800; border-color: #ff9800; }
+.btn-action.hand-raise:hover { background: #f57c00; }
+.btn-action.hand-raised { background: #ff9800; border-color: #ff9800; opacity: 0.8; }
 
 .mute-icon { font-size: 14px; }
 
@@ -917,6 +1091,17 @@ const playRemoteAudio = (socketId, stream) => {
   font-weight: 500;
   color: #fff;
   letter-spacing: 2px;
+}
+
+.btn-close-chat {
+  width: 28px;
+  height: 28px;
+  border-radius: 2px;
+  border: 1px solid #333;
+  background: transparent;
+  color: #888;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 .chat-header + .meeting-bar {
@@ -1038,7 +1223,7 @@ const playRemoteAudio = (socketId, stream) => {
 
 .chat-input input::placeholder { color: #444; }
 
-.chat-input button {
+.chat-input .btn-send {
   padding: 12px 24px;
   background: #fff;
   color: #000;
@@ -1047,6 +1232,10 @@ const playRemoteAudio = (socketId, stream) => {
   cursor: pointer;
   letter-spacing: 1px;
   font-size: 14px;
+}
+
+.chat-input .btn-send:hover {
+  background: #ddd;
 }
 
 @media (max-width: 768px) {

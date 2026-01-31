@@ -212,7 +212,9 @@ io.on('connection', (socket) => {
       id: participantId, 
       name: participantName, 
       isHost: isHost || false,
-      muted: !isHost,
+      muted: true,  // 听众默认静音
+      canSpeak: false,  // 是否可以发言
+      handRaised: false,  // 是否举手申请发言
       socketId: socket.id
     });
     rooms.set(meetingId, room);
@@ -221,7 +223,10 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       participantId,
       participantName,
-      isHost
+      isHost: isHost || false,
+      muted: true,
+      canSpeak: false,
+      handRaised: false
     });
     
     const users = Array.from(room.entries()).map(([id, user]) => ({
@@ -229,6 +234,98 @@ io.on('connection', (socket) => {
       ...user
     }));
     socket.emit('room-users', users);
+  });
+
+  // 用户举手申请发言
+  socket.on('raise-hand', ({ meetingId }) => {
+    const room = rooms.get(meetingId);
+    if (room) {
+      const user = room.get(socket.id);
+      if (user && !user.isHost) {
+        user.handRaised = true;
+        io.to(`room:${meetingId}`).emit('hand-raised', {
+          participantId: user.id,
+          participantName: user.name,
+          socketId: socket.id
+        });
+      }
+    }
+  });
+
+  // 用户取消举手
+  socket.on('lower-hand', ({ meetingId }) => {
+    const room = rooms.get(meetingId);
+    if (room) {
+      const user = room.get(socket.id);
+      if (user && !user.isHost) {
+        user.handRaised = false;
+        io.to(`room:${meetingId}`).emit('hand-lowered', {
+          participantId: user.id,
+          socketId: socket.id
+        });
+      }
+    }
+  });
+
+  // 主持人同意发言
+  socket.on('allow-speak', ({ meetingId, targetSocketId }) => {
+    const room = rooms.get(meetingId);
+    if (room) {
+      const targetUser = room.get(targetSocketId);
+      if (targetUser && !targetUser.isHost) {
+        targetUser.canSpeak = true;
+        targetUser.handRaised = false;
+        targetUser.muted = false;
+        io.to(`room:${meetingId}`).emit('speaker-allowed', {
+          participantId: targetUser.id,
+          socketId: targetSocketId,
+          participantName: targetUser.name
+        });
+      }
+    }
+  });
+
+  // 主持人禁止发言
+  socket.on('disallow-speak', ({ meetingId, targetSocketId }) => {
+    const room = rooms.get(meetingId);
+    if (room) {
+      const targetUser = room.get(targetSocketId);
+      if (targetUser && !targetUser.isHost) {
+        targetUser.canSpeak = false;
+        targetUser.muted = true;
+        io.to(`room:${meetingId}`).emit('speaker-disallowed', {
+          participantId: targetUser.id,
+          socketId: targetSocketId
+        });
+      }
+    }
+  });
+
+  // 主持人全员禁言
+  socket.on('mute-all', ({ meetingId }) => {
+    const room = rooms.get(meetingId);
+    if (room) {
+      room.forEach((user, socketId) => {
+        if (!user.isHost) {
+          user.muted = true;
+          user.canSpeak = false;
+        }
+      });
+      io.to(`room:${meetingId}`).emit('all-muted');
+    }
+  });
+
+  // 主持人解除全员禁言
+  socket.on('unmute-all', ({ meetingId }) => {
+    const room = rooms.get(meetingId);
+    if (room) {
+      room.forEach((user, socketId) => {
+        if (!user.isHost) {
+          user.muted = false;
+        }
+      });
+      io.to(`room:${meetingId}`).emit('all-unmuted');
+    }
   });
 
   // 修复：发送聊天消息时不广播给自己
