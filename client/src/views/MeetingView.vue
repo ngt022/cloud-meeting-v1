@@ -107,6 +107,17 @@
         </div>
       </div>
       
+      <!-- 会议信息栏 -->
+      <div class="meeting-bar">
+        <span class="meeting-no-display">{{ meeting?.meetingNo }}</span>
+        <button class="btn-copy-no" @click="copyMeetingNo" :class="{ copied: noCopied }">
+          {{ noCopied ? '已复制' : '复制会议号' }}
+        </button>
+        <button class="btn-copy-link-chat" @click="copyLink" :class="{ copied: copied }">
+          {{ copied ? '链接已复制' : '复制链接' }}
+        </button>
+      </div>
+      
       <!-- 表情面板 -->
       <div class="emoji-picker" v-if="showEmojiPicker">
         <div class="emoji-section" v-for="(emojis, category) in emojiCategories" :key="category">
@@ -154,6 +165,7 @@ const chatInput = ref(null)
 const localName = ref('')
 const localParticipantId = ref(null)
 const copied = ref(false)
+const noCopied = ref(false)
 const isHost = ref(false)
 const locked = ref(false)
 const isSpeaking = ref(false)
@@ -203,6 +215,24 @@ const copyLink = async () => {
     document.body.removeChild(textArea)
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
+  }
+}
+
+const copyMeetingNo = async () => {
+  const no = meeting.value?.meetingNo || route.params.no
+  try {
+    await navigator.clipboard.writeText(no)
+    noCopied.value = true
+    setTimeout(() => { noCopied.value = false }, 2000)
+  } catch (e) {
+    const textArea = document.createElement('textarea')
+    textArea.value = no
+    document.body.appendChild(textArea)
+    textArea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textArea)
+    noCopied.value = true
+    setTimeout(() => { noCopied.value = false }, 2000)
   }
 }
 
@@ -318,7 +348,8 @@ const connectSocket = () => {
   })
 
   socket.value.on('room-users', (users) => {
-    participants.value = users
+    // 过滤掉自己，只显示其他参与者
+    participants.value = users.filter(u => u.socketId !== socket.value.id)
   })
 
   socket.value.on('user-joined', (user) => {
@@ -408,8 +439,11 @@ const fetchMeeting = async () => {
     const data = await res.json()
     if (data.success) {
       meeting.value = data.data.meeting
-      const myName = route.query.name || localStorage.getItem('userName') || ''
-      isHost.value = data.data.meeting.hostName === myName
+      // 优先使用路由参数中的name，其次使用localStorage，最后使用默认值
+      localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
+      // 保存到localStorage
+      localStorage.setItem('userName', localName.value)
+      isHost.value = data.data.meeting.hostName === localName.value
       if (isHost.value) isMuted.value = false
       localParticipantId.value = Date.now()
       messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
@@ -422,12 +456,18 @@ const fetchMeeting = async () => {
   }
 }
 
-const toggleMute = () => {
+const toggleMute = async () => {
   if (isHost.value) {
     isMuted.value = !isMuted.value
     if (window.localAudioStream) {
       window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
     }
+    // 主持人也需要通知其他用户静音状态变化
+    socket.value?.emit('participant-muted', {
+      meetingId: route.params.no,
+      participantId: localParticipantId.value,
+      muted: isMuted.value
+    })
     return
   }
   if (locked.value) {
@@ -438,6 +478,12 @@ const toggleMute = () => {
   if (window.localAudioStream) {
     window.localAudioStream.getAudioTracks().forEach(t => t.enabled = !isMuted.value)
   }
+  // 通知服务器静音状态变化
+  socket.value?.emit('participant-muted', {
+    meetingId: route.params.no,
+    participantId: localParticipantId.value,
+    muted: isMuted.value
+  })
 }
 
 const sendMessage = async () => {
@@ -759,6 +805,49 @@ onUnmounted(() => {
   font-weight: 500;
   color: #fff;
   letter-spacing: 2px;
+}
+
+.chat-header + .meeting-bar {
+  border-bottom: 1px solid #222;
+}
+
+.meeting-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #1a1a1a;
+  border-bottom: 1px solid #222;
+}
+
+.meeting-no-display {
+  font-family: monospace;
+  color: #888;
+  font-size: 12px;
+  flex: 1;
+}
+
+.btn-copy-no, .btn-copy-link-chat {
+  padding: 6px 10px;
+  font-size: 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  background: #222;
+  color: #888;
+  border: 1px solid #333;
+  transition: all 0.2s;
+}
+
+.btn-copy-no:hover, .btn-copy-link-chat:hover {
+  background: #333;
+  color: #fff;
+}
+
+.btn-copy-no.copied, .btn-copy-link-chat.copied {
+  background: #4caf50;
+  color: #fff;
+  border-color: #4caf50;
 }
 
 .chat-actions { display: flex; gap: 12px; }
