@@ -328,9 +328,21 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 
-initDb().then(() => {
+initDb().then(async () => {
+  // 创建默认测试会议室
+  const defaultMeetingNo = '8888888888'
+  const existingMeeting = getMeetingByNo(defaultMeetingNo)
+  if (!existingMeeting) {
+    const meeting = createMeeting('测试会议室', '主持人', null)
+    addParticipant(meeting.id, '主持人', true)
+    console.log(`已创建默认测试会议室，会议号: ${defaultMeetingNo}`)
+  } else {
+    console.log(`默认测试会议室已存在，会议号: ${defaultMeetingNo}`)
+  }
+  
   httpServer.listen(PORT, () => {
     console.log(`CloudMeeting running on http://localhost:${PORT}`);
+    console.log(`默认测试会议室会议号: ${defaultMeetingNo}`);
   });
 }).catch(err => {
   console.error('Database init failed:', err);
