@@ -189,6 +189,7 @@ const emojiCategories = {
 }
 
 const socket = ref(null)
+const isJoined = ref(false)  // 标记是否已加入房间
 const isMuted = ref(true)
 const showChat = ref(false)
 const chatMsg = ref('')
@@ -261,6 +262,7 @@ const endMeeting = async () => {
   if (!confirm('确定要结束会议吗？')) return
   try {
     await fetch(`/api/meetings/${meeting.value.id}/end`, { method: 'POST' })
+    isJoined.value = false
     socket.value?.emit('leave-room', { meetingId: route.params.no })
     socket.value?.disconnect()
     webrtc.cleanup()
@@ -358,11 +360,22 @@ const connectSocket = () => {
   socket.value.on('room-users', (users) => {
     // 过滤掉自己，只显示其他参与者
     participants.value = users.filter(u => u.socketId !== socket.value.id)
-    // 为所有现有用户创建 WebRTC 连接
-    webrtc.connectToAllPeers(users)
+    
+    // 只有在已加入房间后才创建WebRTC连接
+    if (isJoined.value) {
+      // 为所有现有用户创建 WebRTC 连接（排除自己）
+      const otherUsers = users.filter(u => u.socketId !== socket.value.id)
+      webrtc.connectToAllPeers(otherUsers)
+    }
   })
 
   socket.value.on('user-joined', (user) => {
+    // 如果自己还没加入房间，忽略
+    if (!isJoined.value && user.socketId === socket.value.id) {
+      isJoined.value = true
+      return
+    }
+    
     participants.value.push(user)
     messages.value.push({ name: '系统', content: `${user.participantName} 加入了会议`, isSelf: false })
     // 处理新用户加入，创建连接
@@ -379,18 +392,30 @@ const connectSocket = () => {
     webrtc.handleUserLeft({ socketId })
   })
 
-  // WebRTC 信令处理
+  // WebRTC 信令处理 - 只有在已加入房间后才处理
   socket.value.on('webrtc-offer', async (data) => {
+    if (!isJoined.value) {
+      console.log('[WebRTC] 忽略未加入时的offer')
+      return
+    }
     console.log('[Socket] 收到 webrtc-offer')
     await webrtc.handleOffer(data)
   })
 
   socket.value.on('webrtc-answer', async (data) => {
+    if (!isJoined.value) {
+      console.log('[WebRTC] 忽略未加入时的answer')
+      return
+    }
     console.log('[Socket] 收到 webrtc-answer')
     await webrtc.handleAnswer(data)
   })
 
   socket.value.on('webrtc-ice-candidate', async (data) => {
+    if (!isJoined.value) {
+      console.log('[WebRTC] 忽略未加入时的ice-candidate')
+      return
+    }
     console.log('[Socket] 收到 webrtc-ice-candidate')
     await webrtc.handleIceCandidate(data)
   })
@@ -431,6 +456,7 @@ const connectSocket = () => {
   socket.value.on('participant-removed', ({ participantId }) => {
     if (participantId === localParticipantId.value) {
       alert('您已被移出会议')
+      isJoined.value = false
       webrtc.cleanup()
       socket.value?.disconnect()
       router.push('/')
@@ -455,6 +481,7 @@ const connectSocket = () => {
 
   socket.value.on('meeting-ended', () => {
     alert('会议已结束')
+    isJoined.value = false
     webrtc.cleanup()
     socket.value?.disconnect()
     router.push('/')
@@ -533,6 +560,7 @@ const sendMessage = async () => {
 }
 
 const leaveMeeting = () => {
+  isJoined.value = false
   socket.value?.emit('leave-room', { meetingId: route.params.no })
   socket.value?.disconnect()
   webrtc.cleanup()
