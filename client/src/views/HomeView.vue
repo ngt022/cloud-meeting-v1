@@ -153,7 +153,11 @@ const formatTime = (timestamp) => {
 }
 
 const quickJoin = async (item) => {
-  router.push(`/meeting/${item.meetingNo}`)
+  const userName = localStorage.getItem('userName') || '匿名用户'
+  router.push({
+    path: `/meeting/${item.meetingNo}`,
+    query: { name: userName }
+  })
 }
 
 const createMeeting = async () => {
@@ -173,11 +177,13 @@ const createMeeting = async () => {
     const data = await res.json()
     
     if (data.success) {
+      const userName = createForm.value.name
+      
       showCreateModal.value = false
       createForm.value = { title: '', name: '', password: '' }
       
       // 保存用户名到 localStorage
-      localStorage.setItem('userName', createForm.value.name)
+      localStorage.setItem('userName', userName)
       
       // Save to history
       saveHistory({
@@ -187,7 +193,7 @@ const createMeeting = async () => {
       
       router.push({
         path: `/meeting/${data.data.meetingNo}`,
-        query: { name: createForm.value.name }
+        query: { name: userName }
       })
     } else {
       alert(data.message || '创建失败')
@@ -229,11 +235,13 @@ const joinMeeting = async () => {
       const joinData = await joinRes.json()
       
       if (joinData.success) {
+        const userName = joinForm.value.name
+        
         showJoinModal.value = false
         joinForm.value = { no: '', name: '', password: '' }
         
         // 保存用户名
-        localStorage.setItem('userName', joinForm.value.name)
+        localStorage.setItem('userName', userName)
         
         // Save to history
         saveHistory({
@@ -243,7 +251,7 @@ const joinMeeting = async () => {
         
         router.push({
           path: `/meeting/${meeting.meetingNo}`,
-          query: { name: joinForm.value.name }
+          query: { name: userName }
         })
       } else {
         alert(joinData.message || '加入失败')
