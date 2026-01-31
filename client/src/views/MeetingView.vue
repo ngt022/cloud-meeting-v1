@@ -60,8 +60,9 @@
             <div class="actions">
               <!-- 主持人控制 -->
               <template v-if="isHost">
-                <button class="btn-action" :class="{ active: isAllMuted }" @click="toggleMuteAll">
-                  {{ isAllMuted ? '解除全员禁言' : '全员禁言' }}
+                <button :class="['btn-action', isMuted && 'active']" @click="toggleMute">
+                  <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
+                  {{ isMuted ? '取消静音' : '静音' }}
                 </button>
                 <button class="btn-end" @click="endMeeting">结束会议</button>
               </template>
@@ -112,12 +113,9 @@
     <footer class="controls">
       <!-- 主持人控制 -->
       <template v-if="isHost">
-        <button :class="['control-btn', isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
+        <button :class="['control-btn', isMuted && 'active']" @click="toggleMute">
           <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
           {{ isMuted ? '取消静音' : '静音' }}
-        </button>
-        <button :class="['control-btn', isAllMuted && 'active']" @click="toggleMuteAll">
-          {{ isAllMuted ? '解除全员禁言' : '全员禁言' }}
         </button>
         <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
           💬 聊天
@@ -164,6 +162,20 @@
           <span class="content">{{ msg.content }}</span>
         </div>
       </div>
+      
+      <!-- 表情面板 -->
+      <div class="emoji-bar">
+        <button class="btn-emoji" @click="showEmojiPicker = !showEmojiPicker">😊</button>
+        <div class="emoji-picker" v-if="showEmojiPicker">
+          <span 
+            v-for="emoji in quickEmojis" 
+            :key="emoji"
+            class="emoji-item"
+            @click="insertEmoji(emoji)"
+          >{{ emoji }}</span>
+        </div>
+      </div>
+      
       <div class="chat-input">
         <input 
           v-model="chatMsg" 
@@ -210,6 +222,8 @@ const socket = ref(null)
 const isJoined = ref(false)
 const isAllMuted = ref(false)  // 全员禁言状态
 const handRaised = ref(false)  // 是否举手
+const showEmojiPicker = ref(false)  // 是否显示表情选择器
+const quickEmojis = ['😀','😂','👍','👎','🎉','🙏','❤️','🔥','💯','👍','👌','🙌','👏','😎','🤔']  // 常用表情
 const isMuted = ref(true)
 const showChat = ref(false)
 const chatMsg = ref('')
@@ -220,6 +234,12 @@ const canSpeak = computed(() => isHost.value || !isMuted.value)
 
 const toggleDanmaku = () => {
   showDanmaku.value = !showDanmaku.value
+}
+
+const insertEmoji = (emoji) => {
+  chatMsg.value += emoji
+  showEmojiPicker.value = false
+  chatInput.value?.focus()
 }
 
 const copyLink = async () => {
@@ -574,12 +594,20 @@ const fetchMeeting = async () => {
     const data = await res.json()
     if (data.success) {
       meeting.value = data.data.meeting
-      // 优先使用路由参数中的name，其次使用localStorage，最后使用默认值
-      localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
-      // 保存到localStorage
-      localStorage.setItem('userName', localName.value)
-      isHost.value = data.data.meeting.hostName === localName.value
-      if (isHost.value) isMuted.value = false
+      
+      // 获取用户名（从路由参数或localStorage）
+      const userName = route.query.name || localStorage.getItem('userName') || '匿名用户'
+      localName.value = userName
+      localStorage.setItem('userName', userName)
+      
+      // 比较用户名判断是否为主持人（不区分大小写）
+      isHost.value = data.data.meeting.hostName.trim().toLowerCase() === userName.trim().toLowerCase()
+      
+      // 主持人默认可以发言，听众默认静音
+      isMuted.value = !isHost.value
+      isAllMuted.value = false
+      handRaised.value = false
+      
       localParticipantId.value = Date.now()
       messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
     } else {
@@ -1202,6 +1230,62 @@ const playRemoteAudio = (socketId, stream) => {
 .chat-msg .content { display: inline-block; padding: 10px 14px; background: #222; border-radius: 8px; font-size: 14px; color: #fff; }
 .chat-msg.self { text-align: right; }
 .chat-msg.self .content { background: #fff; color: #000; }
+
+.emoji-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid #222;
+  position: relative;
+}
+
+.btn-emoji {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid #333;
+  background: #222;
+  color: #888;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.btn-emoji:hover {
+  background: #333;
+  color: #fff;
+}
+
+.emoji-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 16px;
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 280px;
+  z-index: 300;
+}
+
+.emoji-item {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 18px;
+  transition: background 0.2s;
+}
+
+.emoji-item:hover {
+  background: #333;
+}
 
 .chat-input {
   display: flex;

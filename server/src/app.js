@@ -159,7 +159,8 @@ app.post('/api/meetings/:id/join', (req, res) => {
     if (meeting.password && meeting.password !== password) {
       return res.status(401).json({ success: false, message: '会议密码错误' });
     }
-    const isHost = meeting.hostName === name;
+    // 通过比较名称判断是否为主持人（不区分大小写，去除首尾空格）
+    const isHost = meeting.hostName.trim().toLowerCase() === name.trim().toLowerCase();
     const participant = addParticipant(meeting.id, name, isHost);
     if (meeting.status === 'waiting') {
       updateMeetingStatus(meeting.id, 'ongoing');
@@ -168,6 +169,7 @@ app.post('/api/meetings/:id/join', (req, res) => {
       success: true,
       data: {
         participantId: participant.id,
+        isHost: isHost,  // 返回是否为主持人
         meetingNo: meeting.meetingNo
       }
     });
