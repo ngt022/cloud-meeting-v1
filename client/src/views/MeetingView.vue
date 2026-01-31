@@ -72,11 +72,7 @@
                   🙋 举手发言
                 </button>
                 <button v-if="handRaised" class="btn-action hand-raised" @click="lowerHand">
-                  🙋 已举手中
-                </button>
-                <button :class="['btn-action', !isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
-                  <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-                  {{ isMuted ? '静音' : '发言中' }}
+                  🙋 取消举手
                 </button>
               </template>
             </div>
@@ -129,10 +125,6 @@
         </button>
         <button v-if="handRaised" class="control-btn hand-raised" @click="lowerHand">
           🙋 取消举手
-        </button>
-        <button :class="['control-btn', !isMuted && 'active']" @click="toggleMute" :disabled="!canSpeak">
-          <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-          {{ isMuted ? '静音' : '发言中' }}
         </button>
         <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
           💬 聊天
@@ -676,6 +668,11 @@ const raiseHand = () => {
 // 取消举手
 const lowerHand = () => {
   handRaised.value = false
+  // 取消发言权限，恢复静音状态
+  if (!isHost.value) {
+    isMuted.value = true
+    webrtc.updateLocalAudioTrack(false)
+  }
   socket.value?.emit('lower-hand', { meetingId: route.params.no })
 }
 

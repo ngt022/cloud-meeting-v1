@@ -261,7 +261,15 @@ io.on('connection', (socket) => {
       const user = room.get(socket.id);
       if (user && !user.isHost) {
         user.handRaised = false;
+        // 取消发言权限，恢复静音
+        user.canSpeak = false;
+        user.muted = true;
         io.to(`room:${meetingId}`).emit('hand-lowered', {
+          participantId: user.id,
+          socketId: socket.id
+        });
+        // 通知所有人该用户被取消发言权限
+        io.to(`room:${meetingId}`).emit('speaker-disallowed', {
           participantId: user.id,
           socketId: socket.id
         });
