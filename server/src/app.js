@@ -275,7 +275,7 @@ io.on('connection', (socket) => {
 
   // WebRTC 信令：转发 offer
   socket.on('webrtc-offer', ({ meetingId, targetSocketId, offer }) => {
-    socket.to(targetSocketId).emit('webrtc-offer', {
+    io.to(targetSocketId).emit('webrtc-offer', {
       fromSocketId: socket.id,
       offer
     });
@@ -283,7 +283,7 @@ io.on('connection', (socket) => {
 
   // WebRTC 信令：转发 answer
   socket.on('webrtc-answer', ({ meetingId, targetSocketId, answer }) => {
-    socket.to(targetSocketId).emit('webrtc-answer', {
+    io.to(targetSocketId).emit('webrtc-answer', {
       fromSocketId: socket.id,
       answer
     });
@@ -291,7 +291,7 @@ io.on('connection', (socket) => {
 
   // WebRTC 信令：转发 ICE candidate
   socket.on('webrtc-ice-candidate', ({ meetingId, targetSocketId, candidate }) => {
-    socket.to(targetSocketId).emit('webrtc-ice-candidate', {
+    io.to(targetSocketId).emit('webrtc-ice-candidate', {
       fromSocketId: socket.id,
       candidate
     });
