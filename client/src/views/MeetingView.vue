@@ -1,583 +1,987 @@
 <template>
-  <div class="meeting">
-    <!-- 弹幕层 -->
-    <div class="danmaku-layer" v-if="showDanmaku">
-      <transition-group name="danmaku">
-        <div 
-          v-for="danmaku in activeDanmakus" 
-          :key="danmaku.id"
-          class="danmaku-item"
-          :style="{ color: danmaku.color }"
-        >
-          {{ danmaku.senderName }}: {{ danmaku.content }}
+  <div class="meeting-container">
+    <!-- 主舞台区域 -->
+    <div class="stage" :class="{ 'has-screen-share': isScreenSharing }">
+      <!-- 屏幕共享内容 -->
+      <div v-if="isScreenSharing && screenShareStream" class="screen-share-container">
+        <video 
+          ref="screenShareVideo"
+          class="screen-share-video"
+          autoplay 
+          playsinline
+        ></video>
+        <div class="share-indicator">
+          <span class="dot"></span>
+          正在共享屏幕：{{ screenSharerName }}
         </div>
-      </transition-group>
-    </div>
-
-    <!-- 顶部栏 -->
-    <header class="header">
-      <div class="meeting-info">
-        <span class="title">{{ meeting?.title }}</span>
-        <span class="meeting-no">{{ meeting?.meetingNo }}</span>
       </div>
-      <div class="header-actions">
-        <button class="btn-danmaku" @click="toggleDanmaku" :class="{ active: showDanmaku }">
-          弹幕
-        </button>
-        <button class="btn-copy" @click="copyLink" :class="{ copied }">
-          {{ copied ? '已复制' : '复制链接' }}
-        </button>
-        <button class="btn-lock" @click="toggleLock" :class="{ locked }">
-          {{ locked ? '已锁定' : '锁定' }}
-        </button>
-        <span class="time">{{ duration }}</span>
-        <span class="users">{{ participants.length + 1 }}人</span>
-      </div>
-    </header>
 
-    <!-- 会议内容区 -->
-    <div class="meeting-content" :class="{ 'with-chat': showChat }">
-      <div class="audio-area">
-        <div class="audio-visual">
-          <div class="wave" :class="{ active: isSpeaking }">
-            <span></span><span></span><span></span><span></span><span></span>
-          </div>
-          <div class="status-text">
-            <span v-if="isHost" class="host-status">主持人</span>
-            <span v-else-if="isMuted" class="muted">静音中</span>
-            <span v-else-if="!canSpeak" class="no-speak">等待发言</span>
-            <span v-else class="speaking">可以发言</span>
-          </div>
-        </div>
-        
-        <div class="participants-section">
-          <div class="participant-card host" :class="{ 'is-self': true }">
-            <div class="avatar host-avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
-            <div class="info">
-              <span class="name">{{ localName }} <span v-if="isHost" class="role-tag host">主持人</span></span>
-              <span class="status">{{ getLocalStatus() }}</span>
+      <!-- 视频网格布局（按发言排序） -->
+      <div class="video-grid" :class="{ 'compact': isScreenSharing }">
+        <!-- 按发言状态排序：正在说话的人排在前面 -->
+        <template v-for="user in sortedParticipants" :key="user.socketId">
+          <div 
+            class="video-tile"
+            :class="{ 
+              'speaking': user.isSpeaking,
+              'is-host': user.isHost,
+              'active-speaker': user.socketId === activeSpeakerId
+            }"
+          >
+            <video 
+              v-if="user.hasVideo"
+              :ref="el => setVideoRef(user.socketId, el)"
+              class="video-element" 
+              autoplay 
+              playsinline
+              :muted="user.socketId === socket?.id"
+            ></video>
+            <div v-else class="avatar-placeholder">
+              {{ (user.name || '?').charAt(0).toUpperCase() }}
             </div>
-            <div class="actions">
-              <!-- 主持人控制 -->
-              <template v-if="isHost">
-                <button :class="['btn-action', !isMuted && 'active']" @click="toggleMute">
-                  <span class="mute-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-                  {{ isMuted ? '静音' : '发言中' }}
-                </button>
-                <button class="btn-end" @click="endMeeting">结束会议</button>
-              </template>
-              <!-- 听众控制 -->
-              <template v-else>
-                <button v-if="!handRaised && isMuted" class="btn-action hand-raise" @click="raiseHand">
-                  🙋 举手发言
-                </button>
-                <button v-if="handRaised" class="btn-action hand-raised" @click="lowerHand">
-                  🙋 取消举手
-                </button>
-              </template>
+            
+            <!-- 发言者指示器 -->
+            <div v-if="user.isSpeaking" class="speaker-indicator">
+              <span class="wave-ring"></span>
+              <span class="wave-ring"></span>
+              <span class="wave-ring"></span>
             </div>
+            
+            <div class="video-overlay">
+              <span class="name-badge">
+                {{ user.name }}
+                <span v-if="user.socketId === socket?.id" class="self-badge">(我)</span>
+              </span>
+              <div class="status-icons">
+                <span v-if="user.isHost" class="icon host-icon">👑</span>
+                <span v-if="user.isMuted" class="icon muted-icon">🔇</span>
+                <span v-if="user.isMutedByHost" class="icon forced-muted">🚫</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 本地视频（右下角小窗） -->
+        <div class="video-tile local" :class="{ 'speaking': isSpeaking && !isMuted }">
+          <video 
+            v-if="hasVideo && localVideoStream"
+            ref="localVideo" 
+            class="video-element" 
+            autoplay 
+            muted 
+            playsinline
+          ></video>
+          <div v-else class="avatar-placeholder small">
+            {{ (localName || '我').charAt(0).toUpperCase() }}
           </div>
           
-          <div v-for="user in participants" :key="user.socketId" 
-               class="participant-card"
-               :class="{ 'muted': user.muted, 'hand-raised': user.handRaised, 'can-speak': user.canSpeak }">
-            <div class="avatar" :class="{ 'host-avatar': user.isHost }">{{ (user.name || '?').charAt(0).toUpperCase() }}</div>
-            <div class="info">
-              <span class="name">
-                {{ user.name || '匿名用户' }}
-                <span v-if="user.isHost" class="role-tag host">主持人</span>
-                <span v-else-if="user.canSpeak" class="role-tag speaker">发言中</span>
-                <span v-else-if="user.handRaised" class="role-tag hand-raised">举手</span>
-              </span>
-              <span class="status">{{ getUserStatus(user) }}</span>
-            </div>
-            <div class="actions" v-if="isHost && !user.isHost">
-              <button v-if="user.handRaised" class="btn-action allow" @click="allowSpeak(user)">
-                ✓ 允许发言
-              </button>
-              <button :class="['btn-action', user.muted && 'active']" @click="muteParticipant(user)">
-                {{ user.muted ? '取消静音' : '静音' }}
-              </button>
-              <button class="btn-remove" @click="removeParticipant(user)">移出</button>
+          <!-- 本地音量波纹 -->
+          <div v-if="!isMuted && audioLevel > 5" class="local-audio-wave">
+            <div class="wave-circle" :style="{ width: (20 + audioLevel) + 'px', height: (20 + audioLevel) + 'px' }"></div>
+          </div>
+          
+          <div class="video-overlay">
+            <span class="name-badge">{{ localName }}</span>
+            <div class="status-icons">
+              <span class="icon">👤</span>
+              <span v-if="isMuted" class="icon muted-icon">🔇</span>
+              <span v-if="isMutedByHost" class="icon forced-muted">🚫</span>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- 控制栏 -->
-    <footer class="controls">
-      <!-- 主持人控制 -->
-      <template v-if="isHost">
-        <button :class="['control-btn', !isMuted && 'active']" @click="toggleMute">
-          <span class="control-icon">{{ isMuted ? '🔇' : '🎤' }}</span>
-          {{ isMuted ? '静音' : '发言中' }}
-        </button>
-        <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
-          💬 聊天
-        </button>
-        <button class="control-btn leave" @click="endMeeting">结束会议</button>
-      </template>
-      <!-- 听众控制 -->
-      <template v-else>
-        <button v-if="!handRaised && isMuted" class="control-btn hand-raise" @click="raiseHand">
-          🙋 举手发言
-        </button>
-        <button v-if="handRaised" class="control-btn hand-raised" @click="lowerHand">
-          🙋 取消举手
-        </button>
-        <button :class="['control-btn', showChat && 'active']" @click="showChat = !showChat">
-          💬 聊天
-        </button>
-        <button class="control-btn leave" @click="leaveMeeting">退出会议</button>
-      </template>
-    </footer>
+    <!-- 静音状态气泡提示 -->
+    <Transition name="fade">
+      <div v-if="isMuted && isTryingToSpeak" class="muted-toast">
+        <span class="icon">🔇</span>
+        <span>您当前处于静音状态，请开启麦克风后再发言</span>
+        <button class="btn-unmute-hint" @click="toggleAudio">点击解除静音</button>
+      </div>
+    </Transition>
 
-    <!-- 聊天面板 -->
-    <aside class="chat-panel" v-if="showChat">
-      <div class="chat-header">
-        <span>聊天</span>
-        <button @click="showChat = false" class="btn-close-chat">X</button>
-      </div>
-      
-      <!-- 会议信息栏 -->
-      <div class="meeting-bar">
-        <span class="meeting-no-display">{{ meeting?.meetingNo }}</span>
-        <button class="btn-copy-no" @click="copyMeetingNo" :class="{ copied: noCopied }">
-          {{ noCopied ? '已复制' : '复制' }}
+    <!-- 网络状态提示 -->
+    <div v-if="networkQuality === 'poor'" class="network-warning">
+      <span class="icon">⚠️</span>
+      <span>网络不稳定，建议关闭视频以节省带宽</span>
+      <button @click="toggleVideo">关闭视频</button>
+    </div>
+
+    <!-- 侧边栏 -->
+    <aside class="sidebar" :class="{ 'open': sidebarOpen }">
+      <div class="sidebar-tabs">
+        <button 
+          :class="['tab', sidebarTab === 'members' && 'active']"
+          @click="sidebarTab = 'members'"
+        >
+          成员 ({{ participants.length + 1 }})
         </button>
+        <button 
+          :class="['tab', sidebarTab === 'chat' && 'active']"
+          @click="sidebarTab = 'chat'"
+        >
+          聊天
+        </button>
+        <button class="tab close-btn" @click="sidebarOpen = false">×</button>
       </div>
-      
-      <div class="chat-messages" ref="chatContainer">
-        <div v-for="(msg, i) in messages" :key="i" :class="['chat-msg', msg.isSelf && 'self']">
-          <span class="sender">{{ msg.name }}</span>
-          <span class="content">{{ msg.content }}</span>
+
+      <!-- 成员列表 -->
+      <div v-show="sidebarTab === 'members'" class="sidebar-content members-list">
+        <!-- 主持人 -->
+        <div class="member-item host">
+          <div class="avatar">{{ (localName || '我').charAt(0).toUpperCase() }}</div>
+          <div class="info">
+            <span class="name">{{ localName }} (我)</span>
+            <span class="role">主持人</span>
+          </div>
+          <div class="status-badge" :class="{ muted: isMuted }">
+            {{ isMuted ? '静音中' : '发言中' }}
+          </div>
+        </div>
+
+        <!-- 参会者 -->
+        <div 
+          v-for="user in participants" 
+          :key="user.socketId"
+          class="member-item"
+          :class="{ 
+            'muted': user.isMuted,
+            'is-speaking': user.isSpeaking,
+            'active': user.socketId === activeSpeakerId
+          }"
+        >
+          <div class="avatar" :class="{ 'is-host': user.isHost, 'speaking-avatar': user.isSpeaking }">
+            {{ (user.name || '?').charAt(0).toUpperCase() }}
+          </div>
+          <div class="info">
+            <span class="name">
+              {{ user.name }}
+              <span v-if="user.isHost" class="role-badge">主持人</span>
+              <span v-if="user.socketId === activeSpeakerId" class="speaking-badge">🎤 正在发言</span>
+            </span>
+            <span class="status">{{ getUserStatus(user) }}</span>
+          </div>
+          <div v-if="isHost && !user.isHost" class="actions">
+            <button 
+              class="btn-icon" 
+              @click="toggleMuteUser(user)"
+              :title="user.isMuted ? '取消静音' : '静音'"
+              :class="{ 'muted-btn': !user.isMuted }"
+            >
+              {{ user.isMuted ? '🔊' : '🔇' }}
+            </button>
+            <button class="btn-icon remove" @click="removeUser(user)" title="移出">🚪</button>
+          </div>
+        </div>
+
+        <!-- 主持人控制区 -->
+        <div v-if="isHost" class="host-controls">
+          <button 
+            class="btn-control"
+            :class="{ 'active': isAllMuted }"
+            @click="toggleMuteAll"
+          >
+            {{ isAllMuted ? '解除全体静音' : '全体静音' }}
+          </button>
+          <div class="mute-option" v-if="!isAllMuted">
+            <label>
+              <input type="checkbox" v-model="allowSelfUnmute">
+              允许参会者自行解除静音
+            </label>
+          </div>
+          <button 
+            class="btn-control"
+            :class="{ 'active': isLocked }"
+            @click="toggleLock"
+          >
+            {{ isLocked ? '解锁会议' : '锁定会议' }}
+          </button>
         </div>
       </div>
-      
-      <!-- 表情面板 -->
-      <div class="emoji-bar">
-        <button class="btn-emoji" @click="showEmojiPicker = !showEmojiPicker">😊</button>
-        <div class="emoji-picker" v-if="showEmojiPicker">
-          <span 
-            v-for="emoji in quickEmojis" 
-            :key="emoji"
-            class="emoji-item"
-            @click="insertEmoji(emoji)"
-          >{{ emoji }}</span>
+
+      <!-- 聊天 -->
+      <div v-show="sidebarTab === 'chat'" class="sidebar-content chat-panel">
+        <div class="chat-messages" ref="chatContainer">
+          <div 
+            v-for="(msg, index) in messages" 
+            :key="index"
+            class="chat-message"
+            :class="{ 'self': msg.isSelf }"
+          >
+            <span class="sender">{{ msg.name }}</span>
+            <span class="content">{{ msg.content }}</span>
+          </div>
         </div>
-      </div>
-      
-      <div class="chat-input">
-        <input 
-          v-model="chatMsg" 
-          placeholder="输入消息..." 
-          @keyup.enter="sendMessage"
-          ref="chatInput"
-        />
-        <button class="btn-send" @click="sendMessage">发送</button>
+        <div class="chat-input-area">
+          <input 
+            v-model="chatMessage"
+            placeholder="输入消息..."
+            @keyup.enter="sendChatMessage"
+          />
+          <button class="btn-send" @click="sendChatMessage">发送</button>
+        </div>
       </div>
     </aside>
+
+    <!-- 底部控制栏 -->
+    <footer class="control-bar">
+      <div class="controls-wrapper">
+        <!-- 麦克风控制 -->
+        <button 
+          class="control-btn"
+          :class="{ 
+            'active': !isMuted, 
+            'muted': isMuted,
+            'forced-muted': isMutedByHost
+          }"
+          @click="toggleAudio"
+          :title="getMuteTooltip"
+        >
+          <span class="btn-icon">
+            <span v-if="isMutedByHost" class="mute-slash"></span>
+            {{ isMuted ? '🔇' : '🎤' }}
+          </span>
+          <span class="btn-text">{{ isMuted ? '静音' : '取消静音' }}</span>
+          
+          <!-- 音量波纹指示器 -->
+          <div v-if="!isMuted && audioLevel > 5" class="audio-ripple">
+            <span class="ripple" :style="{ height: audioLevel + '%' }"></span>
+            <span class="ripple" :style="{ height: (audioLevel * 0.8) + '%' }"></span>
+            <span class="ripple" :style="{ height: (audioLevel * 0.6) + '%' }"></span>
+          </div>
+        </button>
+
+        <!-- 摄像头控制 -->
+        <button 
+          class="control-btn"
+          :class="{ 'active': hasVideo }"
+          @click="toggleVideo"
+          :title="hasVideo ? '关闭摄像头' : '开启摄像头'"
+        >
+          <span class="btn-icon">{{ hasVideo ? '📹' : '📷' }}</span>
+          <span class="btn-text">{{ hasVideo ? '关闭视频' : '开启视频' }}</span>
+        </button>
+
+        <!-- 屏幕共享 -->
+        <button 
+          class="control-btn share-btn"
+          :class="{ 'active': isScreenSharing }"
+          @click="toggleScreenShare"
+          :title="isScreenSharing ? '停止共享' : '共享屏幕'"
+        >
+          <span class="btn-icon">🖥️</span>
+          <span class="btn-text">{{ isScreenSharing ? '停止共享' : '共享屏幕' }}</span>
+        </button>
+
+        <!-- 成员列表 -->
+        <button 
+          class="control-btn"
+          :class="{ 'active': sidebarOpen && sidebarTab === 'members' }"
+          @click="openSidebar('members')"
+          title="成员列表"
+        >
+          <span class="btn-icon">👥</span>
+          <span class="btn-text">成员</span>
+        </button>
+
+        <!-- 聊天 -->
+        <button 
+          class="control-btn"
+          :class="{ 'active': sidebarOpen && sidebarTab === 'chat' }"
+          @click="openSidebar('chat')"
+          title="聊天"
+        >
+          <span class="btn-icon">💬</span>
+          <span class="btn-text">聊天</span>
+        </button>
+
+        <!-- 更多设置 -->
+        <div class="control-btn settings-btn" @click="showSettings = !showSettings">
+          <span class="btn-icon">⋯</span>
+          <span class="btn-text">更多</span>
+          
+          <div v-if="showSettings" class="settings-popup">
+            <div class="setting-item">
+              <span>背景虚化</span>
+              <label class="switch">
+                <input type="checkbox" v-model="backgroundBlur">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item">
+              <span>录音</span>
+              <label class="switch">
+                <input type="checkbox" v-model="isRecording">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-item" @click="showDeviceSelector = true">
+              <span>切换设备</span>
+              <span class="arrow">›</span>
+            </div>
+            <div class="setting-item">
+              <span>长按空格通话 (PTT)</span>
+              <label class="switch">
+                <input type="checkbox" v-model="pttMode">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 结束按钮 -->
+        <button 
+          class="control-btn end-btn"
+          @click="handleEndMeeting"
+        >
+          <span class="btn-icon">📴</span>
+          <span class="btn-text">{{ isHost ? '结束会议' : '离开会议' }}</span>
+        </button>
+      </div>
+    </footer>
+
+    <!-- 设备选择器 -->
+    <div v-if="showDeviceSelector" class="modal-overlay" @click="showDeviceSelector = false">
+      <div class="modal-content" @click.stop>
+        <h3>选择设备</h3>
+        
+        <div v-if="!hasAudioDevice || !hasVideoDevice" class="device-warning">
+          <span class="icon">⚠️</span>
+          <span>{{ getDeviceWarning }}</span>
+        </div>
+        
+        <div class="device-section">
+          <label>麦克风</label>
+          <select v-model="selectedAudioDevice" @change="changeAudioDevice" :disabled="!hasAudioDevice">
+            <option v-if="!hasAudioDevice" value="">未检测到麦克风</option>
+            <option v-for="device in audioDevices" :key="device.deviceId" :value="device.deviceId">
+              {{ device.label || `麦克风 ${device.deviceId.slice(0, 8)}` }}
+            </option>
+          </select>
+        </div>
+        <div class="device-section">
+          <label>摄像头</label>
+          <select v-model="selectedVideoDevice" @change="changeVideoDevice" :disabled="!hasVideoDevice">
+            <option v-if="!hasVideoDevice" value="">未检测到摄像头</option>
+            <option v-for="device in videoDevices" :key="device.deviceId" :value="device.deviceId">
+              {{ device.label || `摄像头 ${device.deviceId.slice(0, 8)}` }}
+            </option>
+          </select>
+        </div>
+        <button class="btn-close" @click="showDeviceSelector = false">关闭</button>
+      </div>
+    </div>
+
+    <!-- 屏幕共享选择器 -->
+    <div v-if="showScreenSharePicker" class="modal-overlay" @click="cancelScreenShare">
+      <div class="modal-content share-picker" @click.stop>
+        <h3>选择共享内容</h3>
+        <div class="share-options">
+          <button class="share-option" @click="startScreenShare('screen')">
+            <span class="icon">🖥️</span>
+            <span class="label">共享整个屏幕</span>
+          </button>
+          <button class="share-option" @click="startScreenShare('window')">
+            <span class="icon">📱</span>
+            <span class="label">共享应用窗口</span>
+          </button>
+          <button class="share-option" @click="startScreenShare('tab')">
+            <span class="icon">📑</span>
+            <span class="label">共享浏览器标签页</span>
+          </button>
+        </div>
+        <button class="btn-close" @click="cancelScreenShare">取消</button>
+      </div>
+    </div>
+
+    <!-- 被主持人静音确认弹窗 -->
+    <div v-if="showForceMuteDialog" class="modal-overlay">
+      <div class="modal-content force-mute-dialog">
+        <h3>您已被主持人静音</h3>
+        <p>主持人已关闭您的麦克风。您需要手动点击下方按钮才能再次开启。</p>
+        <button class="btn-confirm" @click="confirmUnmute">我知道了，确认开启麦克风</button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
-import { useWebRTC } from '../composables/useWebRTC'
 
 const route = useRoute()
 const router = useRouter()
 
-// WebRTC
-const webrtc = useWebRTC()
-const audioElements = ref(new Map())
+// Refs
+const localVideo = ref(null)
+const screenShareVideo = ref(null)
+const chatContainer = ref(null)
+const videoRefs = ref({})
 
+// State
 const meeting = ref(null)
 const participants = ref([])
 const messages = ref([])
-const chatContainer = ref(null)
-const chatInput = ref(null)
 const localName = ref('')
 const localParticipantId = ref(null)
-const copied = ref(false)
-const noCopied = ref(false)
 const isHost = ref(false)
-const locked = ref(false)
-const isSpeaking = ref(false)
-const showDanmaku = ref(true)
-const activeDanmakus = ref([])
-let danmakuId = 0
-
-const socket = ref(null)
-const isJoined = ref(false)
-const isAllMuted = ref(false)  // 全员禁言状态
-const handRaised = ref(false)  // 是否举手
-const showEmojiPicker = ref(false)  // 是否显示表情选择器
-const quickEmojis = ['😀','😂','👍','👎','🎉','🙏','❤️','🔥','💯','👍','👌','🙌','👏','😎','🤔']  // 常用表情
 const isMuted = ref(true)
-const showChat = ref(false)
-const chatMsg = ref('')
-const duration = ref('00:00')
-const startTime = Date.now()
+const isMutedByHost = ref(false)
+const hasVideo = ref(false)
+const isScreenSharing = ref(false)
+const isSpeaking = ref(false)
+const audioLevel = ref(0)
+const backgroundBlur = ref(false)
+const isRecording = ref(false)
+const pttMode = ref(false)
+const showSettings = ref(false)
+const showDeviceSelector = ref(false)
+const showScreenSharePicker = ref(false)
+const showForceMuteDialog = ref(false)
+const isTryingToSpeak = ref(false)
 
-const canSpeak = computed(() => isHost.value || (localParticipantId.value && !isMuted.value))
+// Sidebar
+const sidebarOpen = ref(false)
+const sidebarTab = ref('members')
 
-const toggleDanmaku = () => {
-  showDanmaku.value = !showDanmaku.value
+// Devices
+const audioDevices = ref([])
+const videoDevices = ref([])
+const selectedAudioDevice = ref('')
+const selectedVideoDevice = ref('')
+const hasAudioDevice = computed(() => audioDevices.value.length > 0)
+const hasVideoDevice = computed(() => videoDevices.value.length > 0)
+
+// Screen share
+let screenShareStream = null
+const screenSharerName = ref('')
+
+// Meeting state
+const isLocked = ref(false)
+const isAllMuted = ref(false)
+const allowSelfUnmute = ref(true)
+
+// Network
+const networkQuality = ref('good')
+
+// Active speaker
+const activeSpeakerId = ref(null)
+
+// Socket
+const socket = ref(null)
+
+// Media streams
+let localAudioStream = null
+let localVideoStream = null
+
+// Audio context
+let audioContext = null
+let analyser = null
+let audioDataArray = null
+let animationFrame = null
+
+// PTT mode
+let isPttPressed = false
+
+// Methods
+const setVideoRef = (socketId, el) => {
+  if (el) videoRefs.value[socketId] = el
 }
 
-const insertEmoji = (emoji) => {
-  chatMsg.value += emoji
-  showEmojiPicker.value = false
-  chatInput.value?.focus()
+const getUserStatus = (user) => {
+  if (user.isMutedByHost) return '已被静音'
+  if (user.isMuted) return '静音中'
+  if (user.isSpeaking) return '正在发言'
+  return '在线'
 }
 
-const copyLink = async () => {
-  const link = window.location.origin + '/meeting/' + route.params.no
-  try {
-    await navigator.clipboard.writeText(link)
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
-  } catch (e) {
-    const textArea = document.createElement('textarea')
-    textArea.value = link
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 2000)
+const getMuteTooltip = () => {
+  if (isMutedByHost.value) return '您已被主持人静音'
+  return isMuted.value ? '点击取消静音' : '点击静音'
+}
+
+const getDeviceWarning = computed(() => {
+  if (!hasAudioDevice.value && !hasVideoDevice.value) return '未检测到麦克风和摄像头'
+  if (!hasAudioDevice.value) return '未检测到麦克风'
+  if (!hasVideoDevice.value) return '未检测到摄像头'
+  return ''
+})
+
+const sortedParticipants = computed(() => {
+  return [...participants.value].sort((a, b) => {
+    if (a.isSpeaking && !b.isSpeaking) return -1
+    if (!a.isSpeaking && b.isSpeaking) return 1
+    if (a.isHost && !b.isHost) return -1
+    if (!a.isHost && b.isHost) return 1
+    return 0
+  })
+})
+
+const toggleAudio = async () => {
+  if (isMutedByHost.value) {
+    showForceMuteDialog.value = true
+    return
+  }
+  
+  isMuted.value = !isMuted.value
+  
+  if (localAudioStream) {
+    localAudioStream.getAudioTracks().forEach(t => {
+      t.enabled = !isMuted.value
+    })
+  }
+  
+  socket.value?.emit('toggle-audio', {
+    meetingId: route.params.no,
+    participantId: localParticipantId.value,
+    isMuted: isMuted.value
+  })
+}
+
+const confirmUnmute = () => {
+  isMutedByHost.value = false
+  isMuted.value = false
+  showForceMuteDialog.value = false
+  
+  if (localAudioStream) {
+    localAudioStream.getAudioTracks().forEach(t => t.enabled = true)
+  }
+  
+  socket.value?.emit('toggle-audio', {
+    meetingId: route.params.no,
+    participantId: localParticipantId.value,
+    isMuted: false
+  })
+}
+
+const toggleVideo = async () => {
+  if (hasVideo.value) {
+    hasVideo.value = false
+    if (localVideoStream) {
+      localVideoStream.getTracks().forEach(t => t.stop())
+      localVideoStream = null
+    }
+  } else {
+    try {
+      const constraints = selectedVideoDevice.value 
+        ? { video: { deviceId: selectedVideoDevice.value } }
+        : { video: true }
+      localVideoStream = await navigator.mediaDevices.getUserMedia(constraints)
+      hasVideo.value = true
+      if (localVideo.value) {
+        localVideo.value.srcObject = localVideoStream
+      }
+    } catch (e) {
+      console.error('无法访问摄像头:', e)
+      alert('无法访问摄像头，请检查权限设置')
+    }
+  }
+  
+  socket.value?.emit('toggle-video', {
+    meetingId: route.params.no,
+    participantId: localParticipantId.value,
+    hasVideo: hasVideo.value
+  })
+}
+
+const toggleScreenShare = async () => {
+  if (isScreenSharing.value) {
+    stopScreenShare()
+  } else {
+    showScreenSharePicker.value = true
   }
 }
 
-const copyMeetingNo = async () => {
-  const no = meeting.value?.meetingNo || route.params.no
+const startScreenShare = async (type) => {
   try {
-    await navigator.clipboard.writeText(no)
-    noCopied.value = true
-    setTimeout(() => { noCopied.value = false }, 2000)
+    const constraints = { video: { cursor: 'always' }, audio: true }
+    screenShareStream = await navigator.mediaDevices.getDisplayMedia(constraints)
+    showScreenSharePicker.value = false
+    isScreenSharing.value = true
+    
+    if (screenShareVideo.value) {
+      screenShareVideo.value.srcObject = screenShareStream
+    }
+    
+    socket.value?.emit('start-screen-share', {
+      meetingId: route.params.no,
+      participantId: localParticipantId.value
+    })
+    
+    screenShareStream.getVideoTracks()[0].onended = () => {
+      stopScreenShare()
+    }
   } catch (e) {
-    const textArea = document.createElement('textarea')
-    textArea.value = no
-    document.body.appendChild(textArea)
-    textArea.select()
-    document.execCommand('copy')
-    document.body.removeChild(textArea)
-    noCopied.value = true
-    setTimeout(() => { noCopied.value = false }, 2000)
+    console.error('屏幕共享失败:', e)
+    showScreenSharePicker.value = false
+  }
+}
+
+const stopScreenShare = () => {
+  if (screenShareStream) {
+    screenShareStream.getTracks().forEach(t => t.stop())
+    screenShareStream = null
+  }
+  isScreenSharing.value = false
+  screenSharerName.value = ''
+  socket.value?.emit('stop-screen-share', {
+    meetingId: route.params.no,
+    participantId: localParticipantId.value
+  })
+}
+
+const cancelScreenShare = () => {
+  showScreenSharePicker.value = false
+}
+
+const openSidebar = (tab) => {
+  if (sidebarOpen.value && sidebarTab.value === tab) {
+    sidebarOpen.value = false
+  } else {
+    sidebarTab.value = tab
+    sidebarOpen.value = true
+  }
+}
+
+const toggleMuteUser = (user) => {
+  const newMuteState = !user.isMuted
+  socket.value?.emit('mute-participant', {
+    meetingId: route.params.no,
+    targetSocketId: user.socketId,
+    mute: newMuteState
+  })
+}
+
+const removeUser = (user) => {
+  if (confirm(`确定要将 ${user.name} 移出会议吗？`)) {
+    socket.value?.emit('remove-participant', {
+      meetingId: route.params.no,
+      targetSocketId: user.socketId
+    })
+  }
+}
+
+const toggleMuteAll = () => {
+  if (isAllMuted.value) {
+    socket.value?.emit('unmute-all', { meetingId: route.params.no })
+    isAllMuted.value = false
+  } else {
+    socket.value?.emit('mute-all', { 
+      meetingId: route.params.no,
+      allowSelfUnmute: allowSelfUnmute.value
+    })
+    isAllMuted.value = true
   }
 }
 
 const toggleLock = async () => {
   try {
-    const url = locked.value ? `/api/meetings/${meeting.value.id}/unlock` : `/api/meetings/${meeting.value.id}/lock`
+    const url = isLocked.value 
+      ? `/api/meetings/${meeting.value.id}/unlock`
+      : `/api/meetings/${meeting.value.id}/lock`
     const res = await fetch(url, { method: 'POST' })
     const data = await res.json()
     if (data.success) {
-      locked.value = data.locked
-      messages.value.push({ name: '系统', content: locked.value ? '会议已锁定' : '会议已解锁', isSelf: false })
+      isLocked.value = !isLocked.value
     }
   } catch (e) {
     console.error('锁定操作失败:', e)
   }
 }
 
+const changeAudioDevice = async () => {
+  if (localAudioStream) {
+    localAudioStream.getTracks().forEach(t => t.stop())
+  }
+  try {
+    localAudioStream = await navigator.mediaDevices.getUserMedia({
+      audio: { deviceId: selectedAudioDevice.value }
+    })
+    if (!isMuted.value) {
+      localAudioStream.getAudioTracks().forEach(t => t.enabled = true)
+    }
+  } catch (e) {
+    console.error('切换麦克风失败:', e)
+  }
+}
+
+const changeVideoDevice = async () => {
+  if (localVideoStream) {
+    localVideoStream.getTracks().forEach(t => t.stop())
+  }
+  await toggleVideo()
+}
+
+const chatMessage = ref('')
+const sendChatMessage = () => {
+  if (!chatMessage.value.trim()) return
+  messages.value.push({
+    name: localName.value,
+    content: chatMessage.value,
+    isSelf: true
+  })
+  socket.value?.emit('chat-message', {
+    meetingId: route.params.no,
+    senderName: localName.value,
+    content: chatMessage.value
+  })
+  chatMessage.value = ''
+  nextTick(() => {
+    if (chatContainer.value) {
+      chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+    }
+  })
+}
+
+const handleEndMeeting = () => {
+  if (isHost.value) {
+    if (confirm('确定要结束会议吗？所有参会者将被移出。')) {
+      endMeeting()
+    }
+  } else {
+    leaveMeeting()
+  }
+}
+
 const endMeeting = async () => {
-  if (!confirm('确定要结束会议吗？')) return
   try {
     await fetch(`/api/meetings/${meeting.value.id}/end`, { method: 'POST' })
-    isJoined.value = false
-    socket.value?.emit('leave-room', { meetingId: route.params.no })
-    socket.value?.disconnect()
-    webrtc.cleanup()
-    alert('会议已结束')
+    cleanup()
     router.push('/')
   } catch (e) {
     console.error('结束会议失败:', e)
   }
 }
 
-const muteParticipant = async (user) => {
-  const mute = !user.muted
-  try {
-    await fetch(`/api/meetings/${meeting.value.id}/mute/${user.id}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mute, isHost: user.isHost })
-    })
-  } catch (e) {
-    console.error('静音操作失败:', e)
-  }
+const leaveMeeting = () => {
+  cleanup()
+  router.push('/')
 }
 
-const removeParticipant = async (user) => {
-  if (confirm(`确定要将 ${user.name} 移出会议吗？`)) {
-    try {
-      await fetch(`/api/meetings/${meeting.value.id}/remove/${user.id}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetIsHost: user.isHost })
-      })
-    } catch (e) {
-      console.error('移出操作失败:', e)
-    }
-  }
+const cleanup = () => {
+  socket.value?.emit('leave-room', { meetingId: route.params.no })
+  socket.value?.disconnect()
+  if (localAudioStream) localAudioStream.getTracks().forEach(t => t.stop())
+  if (localVideoStream) localVideoStream.getTracks().forEach(t => t.stop())
+  if (screenShareStream) screenShareStream.getTracks().forEach(t => t.stop())
+  if (audioContext) audioContext.close()
+  if (animationFrame) cancelAnimationFrame(animationFrame)
 }
 
-const startAudio = async () => {
-  try {
-    const stream = await webrtc.initLocalAudio()
-    if (stream) {
-      window.localAudioStream = stream
-      monitorAudioQuality(stream)
-    }
-  } catch (e) {
-    console.warn('无法访问麦克风:', e)
-  }
-}
-
-const monitorAudioQuality = (stream) => {
-  const context = new (window.AudioContext || window.webkitAudioContext)()
-  const source = context.createMediaStreamSource(stream)
-  const analyser = context.createAnalyser()
-  analyser.fftSize = 256
+const initAudioMonitoring = () => {
+  if (!localAudioStream) return
+  
+  audioContext = new (window.AudioContext || window.webkitAudioContext)()
+  analyser = audioContext.createAnalyser()
+  analyser.fftSize = 512
+  analyser.smoothingTimeConstant = 0.8
+  
+  const source = audioContext.createMediaStreamSource(localAudioStream)
   source.connect(analyser)
-  const dataArray = new Uint8Array(analyser.frequencyBinCount)
-  const check = () => {
-    if (!window.localAudioStream) {
-      context.close()
+  
+  audioDataArray = new Uint8Array(analyser.frequencyBinCount)
+  
+  const updateLevel = () => {
+    if (!localAudioStream) {
+      audioLevel.value = 0
+      animationFrame = requestAnimationFrame(updateLevel)
       return
     }
-    analyser.getByteFrequencyData(dataArray)
-    const average = dataArray.reduce((a, b) => a + b) / dataArray.length
-    isSpeaking.value = average > 20 && !isMuted.value
-    requestAnimationFrame(check)
+    
+    analyser.getByteFrequencyData(audioDataArray)
+    
+    let sum = 0
+    for (let i = 0; i < audioDataArray.length; i++) {
+      sum += audioDataArray[i]
+    }
+    const average = sum / audioDataArray.length
+    
+    audioLevel.value = Math.min(100, audioLevel.value * 0.7 + average * 1.5 * 0.3)
+    
+    const wasSpeaking = isSpeaking.value
+    isSpeaking.value = !isMuted.value && average > 20
+    
+    if (isSpeaking.value && isMuted.value) {
+      isTryingToSpeak.value = true
+      setTimeout(() => {
+        isTryingToSpeak.value = false
+      }, 3000)
+    }
+    
+    animationFrame = requestAnimationFrame(updateLevel)
   }
-  context.resume()
-  check()
+  updateLevel()
 }
 
-const stopAudio = () => {
-  webrtc.cleanup()
-  window.localAudioStream = null
+const handlePttKeydown = (e) => {
+  if (!pttMode.value || e.repeat) return
+  if (e.code === 'Space') {
+    e.preventDefault()
+    if (isMuted.value && !isMutedByHost.value) {
+      isMuted.value = false
+      if (localAudioStream) {
+        localAudioStream.getAudioTracks().forEach(t => t.enabled = true)
+      }
+    }
+    isPttPressed = true
+  }
 }
 
-const connectSocket = () => {
+const handlePttKeyup = (e) => {
+  if (!pttMode.value) return
+  if (e.code === 'Space') {
+    e.preventDefault()
+    if (!isMutedByHost.value && isPttPressed) {
+      isMuted.value = true
+      if (localAudioStream) {
+        localAudioStream.getAudioTracks().forEach(t => t.enabled = false)
+      }
+      socket.value?.emit('toggle-audio', {
+        meetingId: route.params.no,
+        participantId: localParticipantId.value,
+        isMuted: true
+      })
+    }
+    isPttPressed = false
+  }
+}
+
+const initSocket = () => {
   socket.value = io({
     transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: 5
+    reconnection: true
   })
-  
-  // 初始化 WebRTC
-  webrtc.setup(socket.value, route.params.no)
   
   socket.value.on('connect', () => {
     socket.value.emit('join-room', {
       meetingId: route.params.no,
       participantId: localParticipantId.value,
-      participantName: localName.value || '匿名',
+      participantName: localName.value,
       isHost: isHost.value
     })
   })
 
   socket.value.on('room-users', (users) => {
-    // 过滤掉自己，只显示其他参与者
     participants.value = users.filter(u => u.socketId !== socket.value.id)
-    
-    // 只有在已加入房间后才创建WebRTC连接
-    if (isJoined.value) {
-      // 为所有现有用户创建 WebRTC 连接（排除自己）
-      const otherUsers = users.filter(u => u.socketId !== socket.value.id)
-      webrtc.connectToAllPeers(otherUsers)
-    }
+    updateActiveSpeaker()
   })
 
   socket.value.on('user-joined', (user) => {
-    // 如果自己还没加入房间，忽略
-    if (!isJoined.value && user.socketId === socket.value.id) {
-      isJoined.value = true
-      return
-    }
-    
     participants.value.push(user)
-    messages.value.push({ name: '系统', content: `${user.participantName} 加入了会议`, isSelf: false })
-    // 处理新用户加入，创建连接
-    webrtc.handleUserJoined(user)
+    messages.value.push({
+      name: '系统',
+      content: `${user.name} 加入了会议`,
+      isSelf: false
+    })
+    updateActiveSpeaker()
   })
 
-  socket.value.on('user-left', ({ socketId, participantId }) => {
-    const user = participants.value.find(p => p.socketId === socketId || p.id === participantId)
+  socket.value.on('user-left', ({ socketId }) => {
+    const user = participants.value.find(p => p.socketId === socketId)
     if (user) {
-      messages.value.push({ name: '系统', content: `${user.name} 离开了会议`, isSelf: false })
-    }
-    participants.value = participants.value.filter(p => p.socketId !== socketId && p.id !== participantId)
-    // 清理 WebRTC 连接
-    webrtc.handleUserLeft({ socketId })
-  })
-
-  // WebRTC 信令处理 - 只有在已加入房间后才处理
-  socket.value.on('webrtc-offer', async (data) => {
-    console.log('[Socket] 收到 webrtc-offer from:', data.fromSocketId)
-    if (!isJoined.value) {
-      console.log('[WebRTC] 未加入但处理offer')
-    }
-    await webrtc.handleOffer(data)
-  })
-
-  socket.value.on('webrtc-answer', async (data) => {
-    console.log('[Socket] 收到 webrtc-answer from:', data.fromSocketId)
-    if (!isJoined.value) {
-      console.log('[WebRTC] 未加入但处理answer')
-    }
-    await webrtc.handleAnswer(data)
-  })
-
-  socket.value.on('webrtc-ice-candidate', async (data) => {
-    console.log('[Socket] 收到 webrtc-ice-candidate from:', data.fromSocketId)
-    if (!isJoined.value) {
-      console.log('[WebRTC] 未加入但处理ice-candidate')
-    }
-    await webrtc.handleIceCandidate(data)
-  })
-
-  socket.value.on('chat-message', (msg) => {
-    // 只接收别人发的消息
-    if (!msg.isSelf) {
-      messages.value.push(msg)
-      nextTick(() => {
-        if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+      messages.value.push({
+        name: '系统',
+        content: `${user.name} 离开了会议`,
+        isSelf: false
       })
     }
+    participants.value = participants.value.filter(p => p.socketId !== socketId)
+    updateActiveSpeaker()
   })
 
-  socket.value.on('chat-sent', () => {
-    // 服务器确认消息已发送，无需操作
-  })
-
-  // 弹幕事件
-  socket.value.on('danmaku', (danmaku) => {
-    danmaku.id = ++danmakuId
-    activeDanmakus.value.push(danmaku)
-    // 5秒后移除
-    setTimeout(() => {
-      activeDanmakus.value = activeDanmakus.value.filter(d => d.id !== danmaku.id)
-    }, 5000)
-  })
-
-  socket.value.on('participant-muted', ({ participantId, muted }) => {
-    if (participantId === localParticipantId.value) {
-      isMuted.value = muted
-      webrtc.updateLocalAudioTrack(!muted)
+  socket.value.on('participant-updated', (data) => {
+    const user = participants.value.find(p => p.socketId === data.socketId)
+    if (user) {
+      Object.assign(user, data)
     }
-    const user = participants.value.find(p => p.id === participantId)
-    if (user) user.muted = muted
-  })
-
-  socket.value.on('participant-removed', ({ participantId }) => {
-    if (participantId === localParticipantId.value) {
-      alert('您已被移出会议')
-      isJoined.value = false
-      webrtc.cleanup()
-      socket.value?.disconnect()
-      router.push('/')
-    } else {
-      const user = participants.value.find(p => p.id === participantId)
-      if (user) {
-        messages.value.push({ name: '系统', content: `${user.name} 已被移出会议`, isSelf: false })
+    if (data.socketId === socket.value.id) {
+      if (data.isMuted !== undefined) {
+        isMuted.value = data.isMuted
+        isMutedByHost.value = data.isMutedByHost || false
       }
-      participants.value = participants.value.filter(p => p.id !== participantId)
+      if (data.hasVideo !== undefined) hasVideo.value = data.hasVideo
     }
+    updateActiveSpeaker()
+  })
+
+  socket.value.on('screen-share-started', ({ participantName }) => {
+    isScreenSharing.value = true
+    screenSharerName.value = participantName
+  })
+
+  socket.value.on('screen-share-stopped', () => {
+    isScreenSharing.value = false
+    screenSharerName.value = ''
   })
 
   socket.value.on('meeting-locked', () => {
-    locked.value = true
+    isLocked.value = true
     messages.value.push({ name: '系统', content: '会议已锁定', isSelf: false })
   })
 
   socket.value.on('meeting-unlocked', () => {
-    locked.value = false
+    isLocked.value = false
     messages.value.push({ name: '系统', content: '会议已解锁', isSelf: false })
+  })
+
+  socket.value.on('all-muted', ({ allowSelfUnmute: allow }) => {
+    isAllMuted.value = true
+    isMuted.value = true
+    isMutedByHost.value = !allow
+    allowSelfUnmute.value = allow
+    if (localAudioStream) {
+      localAudioStream.getAudioTracks().forEach(t => t.enabled = false)
+    }
+  })
+
+  socket.value.on('all-unmuted', () => {
+    isAllMuted.value = false
+    isMuted.value = false
+    isMutedByHost.value = false
+    if (localAudioStream) {
+      localAudioStream.getAudioTracks().forEach(t => t.enabled = true)
+    }
+  })
+
+  socket.value.on('chat-message', (msg) => {
+    if (!msg.isSelf) {
+      messages.value.push(msg)
+      nextTick(() => {
+        if (chatContainer.value) {
+          chatContainer.value.scrollTop = chatContainer.value.scrollHeight
+        }
+      })
+    }
   })
 
   socket.value.on('meeting-ended', () => {
     alert('会议已结束')
-    isJoined.value = false
-    webrtc.cleanup()
-    socket.value?.disconnect()
+    cleanup()
     router.push('/')
   })
+}
 
-  // 举手事件
-  socket.value.on('hand-raised', (data) => {
-    const user = participants.value.find(p => p.socketId === data.socketId)
-    if (user) {
-      user.handRaised = true
-      messages.value.push({ name: '系统', content: `${data.participantName} 举手申请发言`, isSelf: false })
-    }
-  })
+const updateActiveSpeaker = () => {
+  const speakingUser = participants.value.find(p => p.isSpeaking)
+  activeSpeakerId.value = speakingUser ? speakingUser.socketId : null
+}
 
-  socket.value.on('hand-lowered', (data) => {
-    const user = participants.value.find(p => p.socketId === data.socketId)
-    if (user) {
-      user.handRaised = false
-    }
-  })
-
-  // 允许发言事件
-  socket.value.on('speaker-allowed', (data) => {
-    if (data.socketId === socket.value.id) {
-      // 是自己被允许发言
-      isMuted.value = false
-      handRaised.value = false
-      webrtc.updateLocalAudioTrack(true)
-    }
-    const user = participants.value.find(p => p.socketId === data.socketId)
-    if (user) {
-      user.canSpeak = true
-      user.handRaised = false
-      user.muted = false
-      messages.value.push({ name: '系统', content: `${data.participantName} 已被允许发言`, isSelf: false })
-    }
-  })
-
-  // 禁止发言事件
-  socket.value.on('speaker-disallowed', (data) => {
-    if (data.socketId === socket.value.id) {
-      // 是自己被禁止发言
-      isMuted.value = true
-      handRaised.value = false
-      webrtc.updateLocalAudioTrack(false)
-    }
-    const user = participants.value.find(p => p.socketId === data.socketId)
-    if (user) {
-      user.canSpeak = false
-      user.muted = true
-    }
-  })
-
-  // 全员禁言事件
-  socket.value.on('all-muted', () => {
-    isAllMuted.value = true
-    if (!isHost.value) {
-      isMuted.value = true
-      handRaised.value = false
-      webrtc.updateLocalAudioTrack(false)
-    }
-    messages.value.push({ name: '系统', content: '主持人已开启全员禁言', isSelf: false })
-  })
-
-  // 解除全员禁言事件
-  socket.value.on('all-unmuted', () => {
-    isAllMuted.value = false
-    if (!isHost.value) {
-      isMuted.value = false
-      webrtc.updateLocalAudioTrack(true)
-    }
-    messages.value.push({ name: '系统', content: '主持人已解除全员禁言', isSelf: false })
-  })
+const initMediaDevices = async () => {
+  try {
+    await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+      .catch(() => {})
+    
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    audioDevices.value = devices.filter(d => d.kind === 'audioinput')
+    videoDevices.value = devices.filter(d => d.kind === 'videoinput')
+    
+    if (audioDevices.value.length) selectedAudioDevice.value = audioDevices.value[0].deviceId
+    if (videoDevices.value.length) selectedVideoDevice.value = videoDevices.value[0].deviceId
+  } catch (e) {
+    console.error('获取设备列表失败:', e)
+  }
 }
 
 const fetchMeeting = async () => {
@@ -586,22 +990,10 @@ const fetchMeeting = async () => {
     const data = await res.json()
     if (data.success) {
       meeting.value = data.data.meeting
-      
-      // 获取用户名（从路由参数或localStorage）
-      const userName = route.query.name || localStorage.getItem('userName') || '匿名用户'
-      localName.value = userName
-      localStorage.setItem('userName', userName)
-      
-      // 比较用户名判断是否为主持人（不区分大小写）
-      isHost.value = data.data.meeting.hostName.trim().toLowerCase() === userName.trim().toLowerCase()
-      
-      // 主持人默认可以发言，听众默认静音
+      localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
+      isHost.value = data.data.meeting.hostName.trim().toLowerCase() === localName.value.trim().toLowerCase()
       isMuted.value = !isHost.value
-      isAllMuted.value = false
-      handRaised.value = false
-      
       localParticipantId.value = Date.now()
-      messages.value = data.data.chats.map(c => ({ name: c.senderName, content: c.content, isSelf: false }))
     } else {
       alert(data.message || '会议不存在')
       router.push('/')
@@ -611,719 +1003,44 @@ const fetchMeeting = async () => {
   }
 }
 
-const toggleMute = async () => {
-  if (isHost.value) {
-    isMuted.value = !isMuted.value
-    webrtc.updateLocalAudioTrack(!isMuted.value)
-    console.log('[Audio] 主持人静音状态:', isMuted.value)
-    // 主持人也需要通知其他用户静音状态变化
-    socket.value?.emit('participant-muted', {
-      meetingId: route.params.no,
-      participantId: localParticipantId.value,
-      muted: isMuted.value
-    })
-    return
-  }
-  if (locked.value) {
-    alert('请等待主持人允许发言')
-    return
-  }
-  isMuted.value = !isMuted.value
-  webrtc.updateLocalAudioTrack(!isMuted.value)
-  console.log('[Audio] 静音状态变更:', isMuted.value)
-  // 通知服务器静音状态变化
-  socket.value?.emit('participant-muted', {
-    meetingId: route.params.no,
-    participantId: localParticipantId.value,
-    muted: isMuted.value
-  })
-}
-
-// 获取本地用户状态显示
-const getLocalStatus = () => {
-  if (isHost.value) return '主持人'
-  if (isMuted.value) {
-    if (handRaised.value) return '等待发言中...'
-    return '静音中'
-  }
-  return '在线'
-}
-
-// 获取用户状态显示
-const getUserStatus = (user) => {
-  if (user.isHost) return '主持人'
-  if (user.muted) {
-    if (user.handRaised) return '举手申请发言'
-    return '已静音'
-  }
-  return '在线'
-}
-
-// 举手发言
-const raiseHand = () => {
-  handRaised.value = true
-  socket.value?.emit('raise-hand', { meetingId: route.params.no })
-}
-
-// 取消举手
-const lowerHand = () => {
-  handRaised.value = false
-  // 取消发言权限，恢复静音状态
-  if (!isHost.value) {
-    isMuted.value = true
-    webrtc.updateLocalAudioTrack(false)
-  }
-  socket.value?.emit('lower-hand', { meetingId: route.params.no })
-}
-
-// 允许用户发言
-const allowSpeak = (user) => {
-  socket.value?.emit('allow-speak', {
-    meetingId: route.params.no,
-    targetSocketId: user.socketId
-  })
-}
-
-// 全员禁言/解除禁言
-const toggleMuteAll = async () => {
-  if (isAllMuted.value) {
-    // 解除全员禁言
-    socket.value?.emit('unmute-all', { meetingId: route.params.no })
-    isAllMuted.value = false
-  } else {
-    // 全员禁言
-    socket.value?.emit('mute-all', { meetingId: route.params.no })
-    isAllMuted.value = true
-  }
-}
-
-const sendMessage = async () => {
-  if (!chatMsg.value.trim()) return
-  const name = localName.value || '匿名'
-  const content = chatMsg.value
-  
-  // 立即显示自己的消息
-  messages.value.push({ name, content, isSelf: true })
-  
-  // 发送到服务器
-  socket.value.emit('chat-message', { 
-    meetingId: route.params.no, 
-    senderName: name, 
-    content: content,
-    senderSocketId: socket.value.id
-  })
-  
-  chatMsg.value = ''
-  nextTick(() => {
-    if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-  })
-}
-
-const leaveMeeting = () => {
-  isJoined.value = false
-  socket.value?.emit('leave-room', { meetingId: route.params.no })
-  socket.value?.disconnect()
-  webrtc.cleanup()
-  router.push('/')
-}
-
-let timer = null
-const updateDuration = () => {
-  const diff = Math.floor((Date.now() - startTime) / 1000)
-  const m = Math.floor(diff / 60)
-  const s = diff % 60
-  duration.value = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
 onMounted(async () => {
+  localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
+  await fetchMeeting()
+  await initMediaDevices()
+  
   try {
-    localName.value = route.query.name || localStorage.getItem('userName') || '匿名用户'
-    localStorage.setItem('userName', localName.value)
-    await fetchMeeting()
-    await startAudio()
-    connectSocket()
-    timer = setInterval(updateDuration, 1000)
-    
-    // 监听远程音频流变化
-    watch(() => webrtc.remoteAudioStreams.value, (streams) => {
-      try {
-        console.log('[Watch] 远程音频流变化:', streams.size)
-        streams.forEach((stream, socketId) => {
-          try {
-            console.log('[Watch] 播放远程音频:', socketId, '轨道数:', stream.getTracks().length)
-            playRemoteAudio(socketId, stream)
-          } catch (e) {
-            console.error('[Watch] 播放远程音频错误:', e)
-          }
-        })
-      } catch (e) {
-        console.error('[Watch] 监听错误:', e)
-      }
-    }, { deep: true })
+    localAudioStream = await navigator.mediaDevices.getUserMedia({ 
+      audio: selectedAudioDevice.value ? { deviceId: selectedAudioDevice.value } : true 
+    })
+    initAudioMonitoring()
   } catch (e) {
-    console.error('[Error] 初始化失败:', e)
-    alert('初始化失败，请刷新页面重试')
+    console.warn('无法访问麦克风:', e)
   }
-})
-
-// 全局错误处理，防止黑屏
-window.addEventListener('error', (e) => {
-  console.error('[Global Error]', e.error)
+  
+  // 监听 PTT 模式
+  if (pttMode.value) {
+    window.addEventListener('keydown', handlePttKeydown)
+    window.addEventListener('keyup', handlePttKeyup)
+  }
+  
+  initSocket()
 })
 
 onUnmounted(() => {
-  if (timer) clearInterval(timer)
-  webrtc.cleanup()
-  socket.value?.disconnect()
+  cleanup()
+  window.removeEventListener('keydown', handlePttKeydown)
+  window.removeEventListener('keyup', handlePttKeyup)
 })
 
-// 播放远程音频
-const playRemoteAudio = (socketId, stream) => {
-  try {
-    let audioEl = audioElements.value.get(socketId)
-    if (!audioEl) {
-      audioEl = new Audio()
-      audioEl.setSinkId && audioEl.setSinkId('default').catch(() => {})
-      audioElements.value.set(socketId, audioEl)
-    }
-    if (audioEl.srcObject !== stream) {
-      audioEl.srcObject = stream
-      audioEl.play().then(() => {
-        console.log('[Audio] 播放成功')
-      }).catch(e => {
-        console.warn('[Audio] 播放需要用户交互:', e.message)
-        // 延迟播放，等待用户交互
-        const tryPlay = () => {
-          audioEl.play().catch(() => {})
-        }
-        document.addEventListener('click', tryPlay, { once: true })
-      })
-    }
-  } catch (e) {
-    console.error('[Audio] 播放错误:', e)
+// 监听 PTT 模式变化
+import { watch } from 'vue'
+watch(pttMode, (val) => {
+  if (val) {
+    window.addEventListener('keydown', handlePttKeydown)
+    window.addEventListener('keyup', handlePttKeyup)
+  } else {
+    window.removeEventListener('keydown', handlePttKeydown)
+    window.removeEventListener('keyup', handlePttKeyup)
   }
-}
-</script>
-
-<style scoped>
-.meeting {
-  height: 100vh;
-  background: #0a0a0a;
-  display: flex;
-  flex-direction: column;
-  margin: -20px;
-  position: relative;
-  overflow: hidden;
-}
-
-/* 弹幕层 */
-.danmaku-layer {
-  position: fixed;
-  top: 80px;
-  left: 0;
-  right: 0;
-  height: 200px;
-  pointer-events: none;
-  z-index: 100;
-  overflow: hidden;
-}
-
-.danmaku-item {
-  position: absolute;
-  right: -200px;
-  font-size: 20px;
-  font-weight: bold;
-  text-shadow: 0 0 4px rgba(0,0,0,0.8);
-  animation: danmaku-fly 8s linear forwards;
-  white-space: nowrap;
-}
-
-@keyframes danmaku-fly {
-  from { transform: translateX(0); }
-  to { transform: translateX(calc(100vw + 200px)); }
-}
-
-.danmaku-enter-active, .danmaku-leave-active {
-  transition: all 0.5s ease;
-}
-.danmaku-enter-from, .danmaku-leave-to {
-  opacity: 0;
-}
-
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 24px;
-  background: #141414;
-  border-bottom: 1px solid #222;
-  z-index: 10;
-}
-
-.meeting-info { display: flex; align-items: center; gap: 20px; }
-.meeting-info .title { color: #fff; font-size: 16px; font-weight: 500; }
-.meeting-info .meeting-no { color: #666; font-size: 14px; font-family: monospace; }
-
-.header-actions { display: flex; align-items: center; gap: 16px; }
-
-.btn-danmaku, .btn-copy, .btn-lock {
-  padding: 8px 14px;
-  background: #222;
-  color: #fff;
-  border: 1px solid #333;
-  border-radius: 2px;
-  font-size: 12px;
-  letter-spacing: 1px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.btn-danmaku:hover, .btn-copy:hover, .btn-lock:hover { background: #333; }
-.btn-danmaku.active { background: #4caf50; border-color: #4caf50; }
-.btn-copy.copied { background: #fff; color: #000; border-color: #fff; }
-.btn-lock.locked { background: #ff4d4f; border-color: #ff4d4f; }
-
-.time, .users { color: #888; font-size: 14px; }
-
-.meeting-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 40px;
-  gap: 40px;
-  overflow-y: auto;
-  z-index: 5;
-}
-
-.meeting-content.with-chat { margin-right: 340px; }
-
-.audio-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 40px;
-}
-
-.audio-visual { text-align: center; }
-
-.wave {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  height: 80px;
-  margin-bottom: 16px;
-}
-
-.wave span {
-  width: 4px;
-  height: 20px;
-  background: #333;
-  border-radius: 2px;
-  transition: all 0.3s;
-}
-
-.wave.active span {
-  background: #4caf50;
-  animation: wave 0.5s ease-in-out infinite;
-}
-
-@keyframes wave {
-  0%, 100% { height: 20px; }
-  50% { height: 60px; }
-}
-
-.status-text { color: #888; font-size: 14px; letter-spacing: 2px; }
-.status-text .muted { color: #ff4d4f; }
-.status-text .no-speak { color: #ff9800; }
-.status-text .speaking { color: #4caf50; }
-.status-text .host-status { color: #ffd700; }
-
-.participants-section {
-  width: 100%;
-  max-width: 600px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.participant-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  background: #141414;
-  border: 1px solid #222;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.participant-card:hover { border-color: #333; }
-.participant-card.muted { opacity: 0.5; }
-.participant-card.hand-raised {
-  border-color: #ff9800;
-  box-shadow: 0 0 10px rgba(255, 152, 0, 0.3);
-}
-.participant-card.can-speak {
-  border-color: #4caf50;
-}
-.participant-card.is-host { 
-  border-color: #ffd700; 
-  background: linear-gradient(135deg, #1a1a1a 0%, #141414 100%);
-}
-
-.avatar {
-  width: 48px;
-  height: 48px;
-  background: #222;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-size: 20px;
-  font-weight: 500;
-}
-
-.avatar.host-avatar {
-  background: linear-gradient(135deg, #ffd700 0%, #ff8c00 100%);
-  color: #000;
-}
-
-.info { flex: 1; }
-.info .name { 
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #fff; 
-  font-size: 16px; 
-  margin-bottom: 4px; 
-}
-.info .status { color: #666; font-size: 12px; }
-
-.role-tag {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 2px;
-  letter-spacing: 1px;
-}
-.role-tag.host {
-  background: #ffd700;
-  color: #000;
-}
-.role-tag.speaker {
-  background: #4caf50;
-  color: #fff;
-}
-.role-tag.hand-raised {
-  background: #ff9800;
-  color: #fff;
-}
-
-.actions { display: flex; gap: 8px; }
-
-.btn-action, .btn-remove, .btn-end {
-  padding: 8px 16px;
-  font-size: 12px;
-  border-radius: 2px;
-  cursor: pointer;
-  letter-spacing: 1px;
-}
-
-.btn-action {
-  background: #222;
-  color: #fff;
-  border: 1px solid #333;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.btn-action:hover { background: #333; }
-.btn-action.active { background: #fff; color: #000; border-color: #fff; }
-.btn-action:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-action.allow { background: #4caf50; border-color: #4caf50; }
-.btn-action.allow:hover { background: #45a049; }
-.btn-action.hand-raise { background: #ff9800; border-color: #ff9800; }
-.btn-action.hand-raise:hover { background: #f57c00; }
-.btn-action.hand-raised { background: #ff9800; border-color: #ff9800; opacity: 0.8; }
-
-.mute-icon { font-size: 14px; }
-
-.btn-remove {
-  background: transparent;
-  color: #ff4d4f;
-  border: 1px solid #ff4d4f;
-}
-.btn-remove:hover { background: #ff4d4f; color: #fff; }
-
-.btn-end {
-  background: #ff4d4f;
-  color: #fff;
-  border: none;
-}
-.btn-end:hover { background: #ff6b6b; }
-
-.controls {
-  display: flex;
-  justify-content: center;
-  gap: 24px;
-  padding: 24px;
-  background: #141414;
-  border-top: 1px solid #222;
-  z-index: 10;
-}
-
-.control-btn {
-  min-width: 140px;
-  padding: 16px 24px;
-  border-radius: 4px;
-  border: none;
-  background: #222;
-  color: #fff;
-  font-size: 14px;
-  letter-spacing: 2px;
-  cursor: pointer;
-  transition: all 0.3s;
-}
-
-.control-btn:hover { background: #333; }
-.control-btn.active { background: #fff; color: #000; }
-.control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.control-btn.leave { background: #444; }
-.control-btn.leave:hover { background: #555; }
-.control-btn .control-icon { font-size: 16px; }
-
-.chat-panel {
-  position: fixed;
-  right: 0;
-  top: 0;
-  width: 340px;
-  height: 100vh;
-  background: #141414;
-  display: flex;
-  flex-direction: column;
-  z-index: 200;
-  border-left: 1px solid #222;
-}
-
-.chat-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid #222;
-  font-weight: 500;
-  color: #fff;
-  letter-spacing: 2px;
-}
-
-.btn-close-chat {
-  width: 28px;
-  height: 28px;
-  border-radius: 2px;
-  border: 1px solid #333;
-  background: transparent;
-  color: #888;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.chat-header + .meeting-bar {
-  border-bottom: 1px solid #222;
-}
-
-.meeting-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  background: #1a1a1a;
-  border-bottom: 1px solid #222;
-}
-
-.meeting-no-display {
-  font-family: monospace;
-  color: #888;
-  font-size: 12px;
-  flex: 1;
-}
-
-.btn-copy-no, .btn-copy-link-chat {
-  padding: 6px 10px;
-  font-size: 10px;
-  border-radius: 2px;
-  cursor: pointer;
-  letter-spacing: 1px;
-  background: #222;
-  color: #888;
-  border: 1px solid #333;
-  transition: all 0.2s;
-}
-
-.btn-copy-no:hover, .btn-copy-link-chat:hover {
-  background: #333;
-  color: #fff;
-}
-
-.btn-copy-no.copied, .btn-copy-link-chat.copied {
-  background: #4caf50;
-  color: #fff;
-  border-color: #4caf50;
-}
-
-.chat-actions { display: flex; gap: 12px; }
-
-.chat-actions button {
-  width: 32px;
-  height: 32px;
-  border-radius: 2px;
-  border: 1px solid #333;
-  background: transparent;
-  color: #888;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-.btn-emoji { font-size: 18px !important; }
-
-.emoji-picker {
-  background: #1a1a1a;
-  border-bottom: 1px solid #222;
-  padding: 12px;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-.emoji-section {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.emoji-item {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 18px;
-  transition: background 0.2s;
-}
-
-.emoji-item:hover { background: #333; }
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-}
-
-.chat-msg { margin-bottom: 16px; }
-.chat-msg .sender { display: block; font-size: 12px; color: #666; margin-bottom: 6px; }
-.chat-msg .content { display: inline-block; padding: 10px 14px; background: #222; border-radius: 8px; font-size: 14px; color: #fff; }
-.chat-msg.self { text-align: right; }
-.chat-msg.self .content { background: #fff; color: #000; }
-
-.emoji-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  border-top: 1px solid #222;
-  position: relative;
-}
-
-.btn-emoji {
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  border: 1px solid #333;
-  background: #222;
-  color: #888;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-.btn-emoji:hover {
-  background: #333;
-  color: #fff;
-}
-
-.emoji-picker {
-  position: absolute;
-  bottom: 100%;
-  left: 16px;
-  background: #1a1a1a;
-  border: 1px solid #333;
-  border-radius: 4px;
-  padding: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  max-width: 280px;
-  z-index: 300;
-}
-
-.emoji-item {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 18px;
-  transition: background 0.2s;
-}
-
-.emoji-item:hover {
-  background: #333;
-}
-
-.chat-input {
-  display: flex;
-  gap: 12px;
-  padding: 16px;
-  border-top: 1px solid #222;
-}
-
-.chat-input input {
-  flex: 1;
-  padding: 12px 16px;
-  background: #0a0a0a;
-  border: 1px solid #222;
-  border-radius: 2px;
-  outline: none;
-  color: #fff;
-  font-size: 14px;
-}
-
-.chat-input input::placeholder { color: #444; }
-
-.chat-input .btn-send {
-  padding: 12px 24px;
-  background: #fff;
-  color: #000;
-  border: none;
-  border-radius: 2px;
-  cursor: pointer;
-  letter-spacing: 1px;
-  font-size: 14px;
-}
-
-.chat-input .btn-send:hover {
-  background: #ddd;
-}
-
-@media (max-width: 768px) {
-  .meeting-content.with-chat { margin-right: 0; }
-  .chat-panel { width: 100%; }
-  .header-actions .btn-copy, .header-actions .btn-lock { display: none; }
-  .controls { gap: 16px; flex-wrap: wrap; }
-  .control-btn { min-width: 100px; padding: 14px 16px; font-size: 12px; }
-}
+})
 </style>

@@ -204,139 +204,159 @@ setInterval(() => {
   });
 }, 30000);
 
+// 屏幕共享状态
+let screenSharer = null
+
 io.on('connection', (socket) => {
   socket.on('join-room', ({ meetingId, participantId, participantName, isHost }) => {
-    updateActivity(meetingId);
-    socket.join(`room:${meetingId}`);
+    updateActivity(meetingId)
+    socket.join(`room:${meetingId}`)
     
-    const room = rooms.get(meetingId) || new Map();
+    const room = rooms.get(meetingId) || new Map()
     room.set(socket.id, { 
       id: participantId, 
       name: participantName, 
       isHost: isHost || false,
-      muted: true,  // 听众默认静音
-      canSpeak: false,  // 是否可以发言
-      handRaised: false,  // 是否举手申请发言
+      isMuted: !isHost,
+      hasVideo: false,
       socketId: socket.id
-    });
-    rooms.set(meetingId, room);
+    })
+    rooms.set(meetingId, room)
     
     socket.to(`room:${meetingId}`).emit('user-joined', {
       socketId: socket.id,
-      participantId,
-      participantName,
+      id: participantId,
+      name: participantName,
       isHost: isHost || false,
-      muted: true,
-      canSpeak: false,
-      handRaised: false
-    });
+      isMuted: !isHost,
+      hasVideo: false
+    })
     
     const users = Array.from(room.entries()).map(([id, user]) => ({
       socketId: id,
       ...user
-    }));
-    socket.emit('room-users', users);
-  });
+    }))
+    socket.emit('room-users', users)
+  })
 
-  // 用户举手申请发言
-  socket.on('raise-hand', ({ meetingId }) => {
-    const room = rooms.get(meetingId);
+  // 音频切换
+  socket.on('toggle-audio', ({ meetingId, participantId, isMuted }) => {
+    const room = rooms.get(meetingId)
     if (room) {
-      const user = room.get(socket.id);
-      if (user && !user.isHost) {
-        user.handRaised = true;
-        io.to(`room:${meetingId}`).emit('hand-raised', {
-          participantId: user.id,
-          participantName: user.name,
-          socketId: socket.id
-        });
+      const user = room.get(socket.id)
+      if (user) {
+        user.isMuted = isMuted
+        socket.to(`room:${meetingId}`).emit('participant-updated', {
+          socketId: socket.id,
+          isMuted
+        })
       }
     }
-  });
+  })
 
-  // 用户取消举手
-  socket.on('lower-hand', ({ meetingId }) => {
-    const room = rooms.get(meetingId);
+  // 视频切换
+  socket.on('toggle-video', ({ meetingId, participantId, hasVideo }) => {
+    const room = rooms.get(meetingId)
     if (room) {
-      const user = room.get(socket.id);
-      if (user && !user.isHost) {
-        user.handRaised = false;
-        // 取消发言权限，恢复静音
-        user.canSpeak = false;
-        user.muted = true;
-        io.to(`room:${meetingId}`).emit('hand-lowered', {
-          participantId: user.id,
-          socketId: socket.id
-        });
-        // 通知所有人该用户被取消发言权限
-        io.to(`room:${meetingId}`).emit('speaker-disallowed', {
-          participantId: user.id,
-          socketId: socket.id
-        });
+      const user = room.get(socket.id)
+      if (user) {
+        user.hasVideo = hasVideo
+        socket.to(`room:${meetingId}`).emit('participant-updated', {
+          socketId: socket.id,
+          hasVideo
+        })
       }
     }
-  });
+  })
 
-  // 主持人同意发言
-  socket.on('allow-speak', ({ meetingId, targetSocketId }) => {
-    const room = rooms.get(meetingId);
+  // 开始屏幕共享
+  socket.on('start-screen-share', ({ meetingId, participantId }) => {
+    const room = rooms.get(meetingId)
     if (room) {
-      const targetUser = room.get(targetSocketId);
+      const user = room.get(socket.id)
+      if (user) {
+        if (screenSharer && screenSharer.meetingId === meetingId) {
+          io.to(screenSharer.socketId).emit('screen-share-stopped')
+          socket.to(meetingId).emit('screen-share-stopped')
+        }
+        screenSharer = { socketId: socket.id, meetingId, name: user.name }
+        io.to(`room:${meetingId}`).emit('screen-share-started', {
+          socketId: socket.id,
+          participantName: user.name
+        })
+      }
+    }
+  })
+
+  // 停止屏幕共享
+  socket.on('stop-screen-share', ({ meetingId, participantId }) => {
+    if (screenSharer && screenSharer.socketId === socket.id) {
+      screenSharer = null
+      socket.to(`room:${meetingId}`).emit('screen-share-stopped')
+    }
+  })
+
+  // 静音某参会者（主持人）
+  socket.on('mute-participant', ({ meetingId, targetSocketId, mute }) => {
+    const room = rooms.get(meetingId)
+    const host = room?.get(socket.id)
+    if (host?.isHost && room) {
+      const targetUser = room.get(targetSocketId)
       if (targetUser && !targetUser.isHost) {
-        targetUser.canSpeak = true;
-        targetUser.handRaised = false;
-        targetUser.muted = false;
-        io.to(`room:${meetingId}`).emit('speaker-allowed', {
-          participantId: targetUser.id,
+        targetUser.isMuted = mute
+        io.to(targetSocketId).emit('participant-updated', {
           socketId: targetSocketId,
-          participantName: targetUser.name
-        });
+          isMuted: mute
+        })
+        socket.to(meetingId).emit('participant-updated', {
+          socketId: targetSocketId,
+          isMuted: mute
+        })
       }
     }
-  });
+  })
 
-  // 主持人禁止发言
-  socket.on('disallow-speak', ({ meetingId, targetSocketId }) => {
-    const room = rooms.get(meetingId);
-    if (room) {
-      const targetUser = room.get(targetSocketId);
+  // 移出参会者（主持人）
+  socket.on('remove-participant', ({ meetingId, targetSocketId }) => {
+    const room = rooms.get(meetingId)
+    const host = room?.get(socket.id)
+    if (host?.isHost && room) {
+      const targetUser = room.get(targetSocketId)
       if (targetUser && !targetUser.isHost) {
-        targetUser.canSpeak = false;
-        targetUser.muted = true;
-        io.to(`room:${meetingId}`).emit('speaker-disallowed', {
-          participantId: targetUser.id,
-          socketId: targetSocketId
-        });
+        io.to(targetSocketId).emit('participant-removed')
+        socket.to(meetingId).emit('user-left', { socketId: targetSocketId })
+        room.delete(targetSocketId)
       }
     }
-  });
+  })
 
-  // 主持人全员禁言
+  // 全员静音（主持人）
   socket.on('mute-all', ({ meetingId }) => {
-    const room = rooms.get(meetingId);
-    if (room) {
+    const room = rooms.get(meetingId)
+    const host = room?.get(socket.id)
+    if (host?.isHost && room) {
       room.forEach((user, socketId) => {
         if (!user.isHost) {
-          user.muted = true;
-          user.canSpeak = false;
+          user.isMuted = true
         }
-      });
-      io.to(`room:${meetingId}`).emit('all-muted');
+      })
+      io.to(`room:${meetingId}`).emit('all-muted')
     }
-  });
+  })
 
-  // 主持人解除全员禁言
+  // 解除全员静音（主持人）
   socket.on('unmute-all', ({ meetingId }) => {
-    const room = rooms.get(meetingId);
-    if (room) {
+    const room = rooms.get(meetingId)
+    const host = room?.get(socket.id)
+    if (host?.isHost && room) {
       room.forEach((user, socketId) => {
         if (!user.isHost) {
-          user.muted = false;
+          user.isMuted = false
         }
-      });
-      io.to(`room:${meetingId}`).emit('all-unmuted');
+      })
+      io.to(`room:${meetingId}`).emit('all-unmuted')
     }
-  });
+  })
 
   // 修复：发送聊天消息时不广播给自己
   socket.on('chat-message', ({ meetingId, senderName, content, senderSocketId }) => {
@@ -413,6 +433,11 @@ io.on('connection', (socket) => {
     const room = rooms.get(meetingId);
     if (room) {
       const user = room.get(socket.id);
+      // 如果离开的是屏幕共享者
+      if (screenSharer && screenSharer.socketId === socket.id) {
+        screenSharer = null;
+        socket.to(`room:${meetingId}`).emit('screen-share-stopped');
+      }
       room.delete(socket.id);
       if (room.size === 0) updateActivity(meetingId);
       socket.to(`room:${meetingId}`).emit('user-left', { socketId: socket.id, participantId: user?.id });
@@ -424,6 +449,11 @@ io.on('connection', (socket) => {
       if (room.has(socket.id)) {
         updateActivity(meetingId);
         const user = room.get(socket.id);
+        // 如果断开的是屏幕共享者
+        if (screenSharer && screenSharer.socketId === socket.id) {
+          screenSharer = null;
+          io.to(`room:${meetingId}`).emit('screen-share-stopped');
+        }
         room.delete(socket.id);
         io.to(`room:${meetingId}`).emit('user-left', { socketId: socket.id, participantId: user?.id });
         if (room.size === 0) rooms.delete(meetingId);
