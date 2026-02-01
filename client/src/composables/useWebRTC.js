@@ -342,10 +342,6 @@ export function useWebRTC() {
     }
   }
 
-  onUnmounted(() => {
-    cleanup()
-  })
-
   return {
     initLocalAudio,
     initLocalVideo,
