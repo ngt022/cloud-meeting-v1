@@ -2,32 +2,31 @@ import { ref, onUnmounted } from 'vue'
 
 const peerConnections = ref(new Map())
 const remoteAudioStreams = ref(new Map())
+const remoteVideoStreams = ref(new Map())
+
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' }
   ]
 }
 
-// 本地音频流
+// 本地流
 let localAudioStream = null
-let isMutedState = true  // 静音状态锁
+let localVideoStream = null
+let localScreenStream = null
 
 export function useWebRTC() {
   const socket = ref(null)
   const meetingId = ref(null)
 
   // 初始化本地音频
-  const initLocalAudio = async () => {
+  const initLocalAudio = async (deviceId = null) => {
     try {
-      localAudioStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      })
+      const constraints = deviceId 
+        ? { audio: { deviceId: { exact: deviceId } } }
+        : { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }
+      localAudioStream = await navigator.mediaDevices.getUserMedia(constraints)
       return localAudioStream
     } catch (e) {
       console.error('无法访问麦克风:', e)
@@ -35,8 +34,38 @@ export function useWebRTC() {
     }
   }
 
-  // 获取本地音频流
+  // 初始化本地视频
+  const initLocalVideo = async (deviceId = null) => {
+    try {
+      const constraints = deviceId
+        ? { video: { deviceId: { exact: deviceId } } }
+        : { video: { width: 640, height: 480 } }
+      localVideoStream = await navigator.mediaDevices.getUserMedia(constraints)
+      return localVideoStream
+    } catch (e) {
+      console.error('无法访问摄像头:', e)
+      return null
+    }
+  }
+
+  // 初始化屏幕共享
+  const initScreenShare = async () => {
+    try {
+      localScreenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { cursor: 'always' },
+        audio: true
+      })
+      return localScreenStream
+    } catch (e) {
+      console.error('屏幕共享失败:', e)
+      return null
+    }
+  }
+
+  // 获取本地流
   const getLocalAudioStream = () => localAudioStream
+  const getLocalVideoStream = () => localVideoStream
+  const getLocalScreenStream = () => localScreenStream
 
   // 创建对等连接
   const createPeerConnection = (targetSocketId) => {
@@ -53,9 +82,22 @@ export function useWebRTC() {
       })
     }
 
+    // 添加本地视频轨道
+    if (localVideoStream) {
+      localVideoStream.getTracks().forEach(track => {
+        pc.addTrack(track, localVideoStream)
+      })
+    }
+
+    // 添加屏幕共享轨道
+    if (localScreenStream) {
+      localScreenStream.getVideoTracks().forEach(track => {
+        pc.addTrack(track, localScreenStream)
+      })
+    }
+
     // 处理 ICE candidate
     pc.onicecandidate = (event) => {
-      console.log('[WebRTC] ICE candidate 生成:', event.candidate ? '有' : 'null')
       if (event.candidate && socket.value) {
         socket.value.emit('webrtc-ice-candidate', {
           meetingId: meetingId.value,
@@ -67,22 +109,29 @@ export function useWebRTC() {
 
     // 处理远程轨道
     pc.ontrack = (event) => {
-      console.log('[WebRTC] 收到远程轨道:', targetSocketId)
+      console.log('[WebRTC] 收到远程轨道 from:', targetSocketId)
       const [stream] = event.streams
-      console.log('[WebRTC] 远程流轨道数:', stream.getTracks().length)
-      remoteAudioStreams.value.set(targetSocketId, stream)
+      
+      // 根据轨道类型区分音频和视频
+      event.streams.forEach(s => {
+        s.getTracks().forEach(track => {
+          if (track.kind === 'audio') {
+            remoteAudioStreams.value.set(targetSocketId, s)
+          } else if (track.kind === 'video') {
+            remoteVideoStreams.value.set(targetSocketId, s)
+          }
+        })
+      })
     }
 
-    // 连接状态变化
     pc.onconnectionstatechange = () => {
       console.log(`[WebRTC] 与 ${targetSocketId} 的连接状态:`, pc.connectionState)
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc.connectionState === 'failed') {
         handleConnectionFailure(targetSocketId)
       }
     }
 
     peerConnections.value.set(targetSocketId, pc)
-    console.log('[WebRTC] 创建对等连接:', targetSocketId, '当前总数:', peerConnections.value.size)
     return pc
   }
 
@@ -94,16 +143,15 @@ export function useWebRTC() {
       peerConnections.value.delete(targetSocketId)
     }
     remoteAudioStreams.value.delete(targetSocketId)
+    remoteVideoStreams.value.delete(targetSocketId)
   }
 
   // 创建并发送 offer
   const createOffer = async (targetSocketId) => {
     const pc = createPeerConnection(targetSocketId)
     try {
-      console.log('[WebRTC] 创建 offer:', targetSocketId)
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      console.log('[WebRTC] 发送 offer:', targetSocketId)
       socket.value.emit('webrtc-offer', {
         meetingId: meetingId.value,
         targetSocketId,
@@ -116,14 +164,11 @@ export function useWebRTC() {
 
   // 处理收到的 offer
   const handleOffer = async ({ fromSocketId, offer }) => {
-    console.log('[WebRTC] 处理 offer from:', fromSocketId)
     const pc = createPeerConnection(fromSocketId)
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(offer))
-      console.log('[WebRTC] 远程描述设置成功')
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
-      console.log('[WebRTC] 发送 answer to:', fromSocketId)
       socket.value.emit('webrtc-answer', {
         meetingId: meetingId.value,
         targetSocketId: fromSocketId,
@@ -136,33 +181,25 @@ export function useWebRTC() {
 
   // 处理收到的 answer
   const handleAnswer = async ({ fromSocketId, answer }) => {
-    console.log('[WebRTC] 处理 answer from:', fromSocketId)
     const pc = peerConnections.value.get(fromSocketId)
     if (pc) {
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(answer))
-        console.log('[WebRTC] Answer 远程描述设置成功')
       } catch (e) {
         console.error('[WebRTC] 处理 answer 失败:', e)
       }
-    } else {
-      console.warn('[WebRTC] 未找到对等连接:', fromSocketId)
     }
   }
 
   // 处理收到的 ICE candidate
   const handleIceCandidate = async ({ fromSocketId, candidate }) => {
-    console.log('[WebRTC] 处理 ICE candidate from:', fromSocketId)
     const pc = peerConnections.value.get(fromSocketId)
     if (pc) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
-        console.log('[WebRTC] ICE candidate 添加成功')
       } catch (e) {
         console.error('[WebRTC] 添加 ICE candidate 失败:', e)
       }
-    } else {
-      console.warn('[WebRTC] 添加 ICE candidate 时未找到连接:', fromSocketId)
     }
   }
 
@@ -177,7 +214,6 @@ export function useWebRTC() {
 
   // 处理新用户加入
   const handleUserJoined = (user) => {
-    // 新用户加入后，我们创建连接向其发起 offer
     setTimeout(() => {
       createOffer(user.socketId)
     }, 500)
@@ -185,45 +221,99 @@ export function useWebRTC() {
 
   // 处理用户离开
   const handleUserLeft = ({ socketId }) => {
-    console.log('[WebRTC] 用户离开:', socketId)
     const pc = peerConnections.value.get(socketId)
     if (pc) {
       pc.close()
       peerConnections.value.delete(socketId)
     }
     remoteAudioStreams.value.delete(socketId)
-    console.log('[WebRTC] 清理完成，剩余连接:', peerConnections.value.size)
+    remoteVideoStreams.value.delete(socketId)
   }
 
-  // 更新本地音频轨道状态（静音/取消静音）
-  const updateLocalAudioTrack = (enabled) => {
-    // 使用状态锁，防止并发更新
-    const newState = enabled
-    if (newState === isMutedState) {
-      console.log('[WebRTC] 音频状态无变化，跳过:', newState)
-      return
-    }
-    isMutedState = newState
-    
-    console.log('[WebRTC] 更新本地音频轨道:', newState)
+  // 更新音频轨道状态
+  const updateAudioTrack = (enabled) => {
     if (localAudioStream) {
       localAudioStream.getAudioTracks().forEach(track => {
-        console.log('[WebRTC] 音频轨道设置 enabled:', newState, '原状态:', track.enabled)
-        track.enabled = newState
-        console.log('[WebRTC] 音频轨道实际 enabled:', track.enabled)
+        track.enabled = enabled
       })
     }
   }
 
-  // 获取远程音频流
-  const getRemoteAudioStream = (socketId) => {
-    return remoteAudioStreams.value.get(socketId)
+  // 更新视频轨道状态
+  const updateVideoTrack = (enabled) => {
+    if (localVideoStream) {
+      localVideoStream.getVideoTracks().forEach(track => {
+        track.enabled = enabled
+      })
+    }
   }
 
-  // 获取所有远程音频流
-  const getAllRemoteAudioStreams = () => {
-    return remoteAudioStreams.value
+  // 替换视频轨道（切换摄像头时使用）
+  const replaceVideoTrack = async (newStream) => {
+    if (!newStream) return
+    
+    localVideoStream = newStream
+    const newTrack = newStream.getVideoTracks()[0]
+    
+    peerConnections.value.forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+      if (sender && newTrack) {
+        sender.replaceTrack(newTrack)
+      }
+    })
   }
+
+  // 替换音频轨道（切换麦克风时使用）
+  const replaceAudioTrack = async (newStream) => {
+    if (!newStream) return
+    
+    localAudioStream = newStream
+    const newTrack = newStream.getAudioTracks()[0]
+    
+    peerConnections.value.forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
+      if (sender && newTrack) {
+        sender.replaceTrack(newTrack)
+      }
+    })
+  }
+
+  // 添加屏幕共享轨道
+  const addScreenShareTrack = () => {
+    if (!localScreenStream) return
+    
+    const videoTrack = localScreenStream.getVideoTracks()[0]
+    
+    peerConnections.value.forEach(pc => {
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+      if (sender && videoTrack) {
+        sender.replaceTrack(videoTrack)
+      }
+    })
+
+    // 监听屏幕共享结束
+    videoTrack.onended = () => {
+      removeScreenShareTrack()
+    }
+  }
+
+  // 移除屏幕共享轨道，恢复摄像头
+  const removeScreenShareTrack = () => {
+    if (localVideoStream) {
+      const videoTrack = localVideoStream.getVideoTracks()[0]
+      
+      peerConnections.value.forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+        if (sender && videoTrack) {
+          sender.replaceTrack(videoTrack)
+        }
+      })
+    }
+  }
+
+  // 获取远程流
+  const getRemoteAudioStream = (socketId) => remoteAudioStreams.value.get(socketId)
+  const getRemoteVideoStream = (socketId) => remoteVideoStreams.value.get(socketId)
 
   // 设置 socket 和 meetingId
   const setup = (socketRef, meetingIdValue) => {
@@ -236,20 +326,20 @@ export function useWebRTC() {
     peerConnections.value.forEach(pc => pc.close())
     peerConnections.value.clear()
     remoteAudioStreams.value.clear()
+    remoteVideoStreams.value.clear()
+    
     if (localAudioStream) {
       localAudioStream.getTracks().forEach(t => t.stop())
       localAudioStream = null
     }
-    isMutedState = true  // 重置静音状态
-  }
-
-  // 检查是否静音
-  const isMuted = () => {
-    if (localAudioStream) {
-      const audioTrack = localAudioStream.getAudioTracks()[0]
-      return audioTrack ? !audioTrack.enabled : true
+    if (localVideoStream) {
+      localVideoStream.getTracks().forEach(t => t.stop())
+      localVideoStream = null
     }
-    return true
+    if (localScreenStream) {
+      localScreenStream.getTracks().forEach(t => t.stop())
+      localScreenStream = null
+    }
   }
 
   onUnmounted(() => {
@@ -258,7 +348,11 @@ export function useWebRTC() {
 
   return {
     initLocalAudio,
+    initLocalVideo,
+    initScreenShare,
     getLocalAudioStream,
+    getLocalVideoStream,
+    getLocalScreenStream,
     setup,
     createOffer,
     handleOffer,
@@ -267,12 +361,17 @@ export function useWebRTC() {
     connectToAllPeers,
     handleUserJoined,
     handleUserLeft,
-    updateLocalAudioTrack,
+    updateAudioTrack,
+    updateVideoTrack,
+    replaceVideoTrack,
+    replaceAudioTrack,
+    addScreenShareTrack,
+    removeScreenShareTrack,
     getRemoteAudioStream,
-    getAllRemoteAudioStreams,
+    getRemoteVideoStream,
     cleanup,
-    isMuted,
     peerConnections,
-    remoteAudioStreams
+    remoteAudioStreams,
+    remoteVideoStreams
   }
 }

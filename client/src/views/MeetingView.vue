@@ -468,6 +468,7 @@ const networkQuality = ref('good')
 
 // Active speaker
 const activeSpeakerId = ref(null)
+const handRaisedUsers = ref([]) // 举手用户列表
 
 // Socket
 const socket = ref(null)
@@ -484,6 +485,24 @@ let animationFrame = null
 
 // PTT mode
 let isPttPressed = false
+
+// 举手
+const raiseHand = () => {
+  socket.value?.emit('raise-hand', { meetingId: route.params.no })
+}
+
+// 取消举手
+const lowerHand = () => {
+  socket.value?.emit('lower-hand', { meetingId: route.params.no })
+}
+
+// 允许某用户发言（主持人）
+const allowSpeak = (user) => {
+  socket.value?.emit('allow-speak', {
+    meetingId: route.params.no,
+    targetSocketId: user.socketId
+  })
+}
 
 // Methods
 const setVideoRef = (socketId, el) => {

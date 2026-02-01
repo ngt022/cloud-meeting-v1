@@ -207,6 +207,9 @@ setInterval(() => {
 // 屏幕共享状态
 let screenSharer = null
 
+// 举手状态
+const handRaisedUsers = new Map()
+
 io.on('connection', (socket) => {
   socket.on('join-room', ({ meetingId, participantId, participantName, isHost }) => {
     updateActivity(meetingId)
@@ -219,6 +222,8 @@ io.on('connection', (socket) => {
       isHost: isHost || false,
       isMuted: !isHost,
       hasVideo: false,
+      isHandRaised: false,
+      canSpeak: isHost || false,
       socketId: socket.id
     })
     rooms.set(meetingId, room)
@@ -229,7 +234,9 @@ io.on('connection', (socket) => {
       name: participantName,
       isHost: isHost || false,
       isMuted: !isHost,
-      hasVideo: false
+      hasVideo: false,
+      isHandRaised: false,
+      canSpeak: isHost || false
     })
     
     const users = Array.from(room.entries()).map(([id, user]) => ({
@@ -237,6 +244,12 @@ io.on('connection', (socket) => {
       ...user
     }))
     socket.emit('room-users', users)
+    
+    // 通知主持人有人举手
+    if (handRaisedUsers.has(meetingId)) {
+      const raisedUsers = handRaisedUsers.get(meetingId)
+      socket.emit('hand-raised-list', Array.from(raisedUsers.values()))
+    }
   })
 
   // 音频切换
@@ -244,13 +257,20 @@ io.on('connection', (socket) => {
     const room = rooms.get(meetingId)
     if (room) {
       const user = room.get(socket.id)
-      if (user) {
-        user.isMuted = isMuted
-        socket.to(`room:${meetingId}`).emit('participant-updated', {
-          socketId: socket.id,
-          isMuted
+      if (user && !user.isHost) {
+        // 如果被主持人静音，需要确认才能开启
+        const host = room.get(socket.id)
+        const isForcedMuted = host?.isHost && room.forEach((u, sid) => {
+          if (u.isHost && isMuted === false && handRaisedUsers.has(meetingId)) {
+            // 检查是否是强制静音状态
+          }
         })
       }
+      user.isMuted = isMuted
+      socket.to(`room:${meetingId}`).emit('participant-updated', {
+        socketId: socket.id,
+        isMuted
+      })
     }
   })
 
@@ -264,6 +284,95 @@ io.on('connection', (socket) => {
         socket.to(`room:${meetingId}`).emit('participant-updated', {
           socketId: socket.id,
           hasVideo
+        })
+      }
+    }
+  })
+
+  // 举手
+  socket.on('raise-hand', ({ meetingId }) => {
+    const room = rooms.get(meetingId)
+    if (room) {
+      const user = room.get(socket.id)
+      if (user && !user.isHost && !user.isHandRaised) {
+        user.isHandRaised = true
+        handRaisedUsers.set(meetingId, handRaisedUsers.get(meetingId) || new Map())
+        handRaisedUsers.get(meetingId).set(socket.id, {
+          socketId: socket.id,
+          name: user.name
+        })
+        
+        io.to(`room:${meetingId}`).emit('hand-raised', {
+          socketId: socket.id,
+          name: user.name
+        })
+        
+        // 发送举手列表给新加入的用户
+        socket.emit('hand-raised-list', Array.from(handRaisedUsers.get(meetingId)?.values() || []))
+      }
+    }
+  })
+
+  // 取消举手
+  socket.on('lower-hand', ({ meetingId }) => {
+    const room = rooms.get(meetingId)
+    if (room) {
+      const user = room.get(socket.id)
+      if (user && user.isHandRaised) {
+        user.isHandRaised = false
+        user.canSpeak = false
+        
+        if (handRaisedUsers.has(meetingId)) {
+          handRaisedUsers.get(meetingId).delete(socket.id)
+        }
+        
+        io.to(`room:${meetingId}`).emit('hand-lowered', {
+          socketId: socket.id
+        })
+      }
+    }
+  })
+
+  // 允许发言（主持人）
+  socket.on('allow-speak', ({ meetingId, targetSocketId }) => {
+    const room = rooms.get(meetingId)
+    const host = room?.get(socket.id)
+    if (host?.isHost && room) {
+      const targetUser = room.get(targetSocketId)
+      if (targetUser && !targetUser.isHost) {
+        targetUser.isHandRaised = false
+        targetUser.canSpeak = true
+        targetUser.isMuted = false
+        
+        if (handRaisedUsers.has(meetingId)) {
+          handRaisedUsers.get(meetingId).delete(targetSocketId)
+        }
+        
+        io.to(`room:${meetingId}`).emit('speak-allowed', {
+          socketId: targetSocketId,
+          name: targetUser.name
+        })
+        
+        io.to(targetSocketId).emit('speak-allowed', {
+          socketId: targetSocketId,
+          name: targetUser.name
+        })
+      }
+    }
+  })
+
+  // 禁止发言（主持人）
+  socket.on('disallow-speak', ({ meetingId, targetSocketId }) => {
+    const room = rooms.get(meetingId)
+    const host = room?.get(socket.id)
+    if (host?.isHost && room) {
+      const targetUser = room.get(targetSocketId)
+      if (targetUser && !targetUser.isHost) {
+        targetUser.canSpeak = false
+        targetUser.isMuted = true
+        
+        io.to(`room:${meetingId}`).emit('speak-disallowed', {
+          socketId: targetSocketId
         })
       }
     }
