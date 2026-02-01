@@ -176,8 +176,6 @@ const chatContainer = ref(null)
 const isAllMuted = ref(false)
 const isLocked = ref(false)
 
-const meetingNo = route.params.meetingNo
-
 // 主持人控制功能
 const toggleMuteUser = async (user) => {
   try {
@@ -366,13 +364,20 @@ const sendChatMessage = () => {
 
 // 加入会议
 const joinMeeting = async () => {
+  // 检查会议号是否存在
+  if (!route.params.meetingNo) {
+    alert('会议号无效')
+    router.push('/')
+    return
+  }
+  
   try {
     const name = localStorage.getItem('meetingName') || prompt('请输入您的名称') || '匿名'
     localStorage.setItem('meetingName', name)
     localName.value = name
     
     // 先获取会议信息（通过会议号）
-    const meetingRes = await fetch(`/api/meetings/${meetingNo}`)
+    const meetingRes = await fetch(`/api/meetings/${route.params.meetingNo}`)
     const meetingData = await meetingRes.json()
     
     if (!meetingData.success) {
