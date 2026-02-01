@@ -76,21 +76,31 @@ const checkMeeting = async () => {
     if (data.success) {
       meetingData.value = data.data.meeting
       meetingId.value = data.data.meeting.id
-      needsPassword.value = !!data.data.meeting.password
       
-      // 无密码直接加入，有密码显示密码输入框
-      if (!needsPassword.value) {
-        joinMeeting()
+      // 无密码直接加入
+      if (!data.data.meeting.password) {
+        await joinMeeting()
+      } else {
+        needsPassword.value = true
       }
     } else {
       alert(data.message || '会议不存在')
+      meetingId.value = null
     }
   } catch (e) {
+    console.error('检查会议失败:', e)
     alert('检查会议失败')
+    meetingId.value = null
   }
 }
 
 const joinMeeting = async () => {
+  // 确保 meetingId 已设置
+  if (!meetingId.value) {
+    alert('会议信息无效，请重新检查会议')
+    return
+  }
+  
   try {
     const res = await fetch(`/api/meetings/${meetingId.value}/join`, {
       method: 'POST',
@@ -114,6 +124,7 @@ const joinMeeting = async () => {
       alert(data.message || '加入失败')
     }
   } catch (e) {
+    console.error('加入失败:', e)
     alert('加入失败')
   }
 }
