@@ -8,8 +8,9 @@
         <label>会议号</label>
         <input 
           v-model="meetingNo" 
-          placeholder="请输入会议号"
+          placeholder="请输入8位数字会议号"
           maxlength="12"
+          @input="meetingNo = meetingNo.replace(/[^0-9]/g, '')"
         />
       </div>
 

@@ -67,7 +67,11 @@
         <h2>加入会议</h2>
         <div class="form-group">
           <label>会议号</label>
-          <input v-model="joinForm.no" placeholder="请输入8位会议号" />
+          <input 
+            v-model="joinForm.no" 
+            placeholder="请输入8位数字会议号"
+            @input="joinForm.no = joinForm.no.replace(/[^0-9]/g, '')"
+          />
         </div>
         <div class="form-group">
           <label>您的名称</label>
