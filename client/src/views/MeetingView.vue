@@ -371,13 +371,24 @@ const joinMeeting = async () => {
     localStorage.setItem('meetingName', name)
     localName.value = name
     
-    const res = await fetch(`/api/meetings/${meetingNo}/join`, {
+    // 先获取会议信息（通过会议号）
+    const meetingRes = await fetch(`/api/meetings/${meetingNo}`)
+    const meetingData = await meetingRes.json()
+    
+    if (!meetingData.success) {
+      alert(meetingData.message || '会议不存在')
+      router.push('/')
+      return
+    }
+    
+    // 用会议ID加入
+    const joinRes = await fetch(`/api/meetings/${meetingData.data.meeting.id}/join`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name })
     })
     
-    const data = await res.json()
+    const data = await joinRes.json()
     if (data.success) {
       meetingId.value = data.data.meetingId
       participantId.value = data.data.participantId
